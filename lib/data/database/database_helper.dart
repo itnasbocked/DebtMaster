@@ -39,6 +39,8 @@ class DatabaseHelper {
       CREATE TABLE usuario (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nombre TEXT NOT NULL,
+        correo TEXT NOT NULL UNIQUE,      -- Añadido para el login
+        contrasena TEXT NOT NULL,         -- Añadido para el login
         ingreso_mensual INTEGER NOT NULL
       )
     ''');
@@ -70,7 +72,7 @@ class DatabaseHelper {
       )
     ''');
 
-    // 4. NUEVA: Tabla de Movimientos (Ingresos/Egresos)
+    // 4. Tabla de Movimientos (Ingresos/Egresos)
     await db.execute('''
       CREATE TABLE movimiento (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,6 +85,16 @@ class DatabaseHelper {
         FOREIGN KEY (usuario_id) REFERENCES usuario(id)
       )
     ''');
+
+    await db.insert('usuario', {
+    'nombre': 'Admin',
+    'correo': 'admin@debtmaster.com',
+    'contrasena': 'admin123',
+    'ingreso_mensual': 1000000, // $10,000.00 en centavos
+    });
+
+    final result = await db.query('usuario');
+    print(result);
 
     // 5. Tabla de Alertas
     await db.execute('''
@@ -100,11 +112,35 @@ class DatabaseHelper {
 
   //Funciones CRUD para usuarios
 
-  Future<int> crearUsuario(String nombre, int ingreso) async{
-    final db = await instance.database;
-    return await db.insert('usuario', {
-      'nombre': nombre
+  Future<int> crearUsuario({
+  required String nombre,
+  required String correo,
+  required String contrasena,
+  required double ingresoMensual,
+  }) async {
+  final db = await instance.database;
+  
+  return await db.insert('usuario', {
+    'nombre': nombre,
+    'correo': correo,
+    'contrasena': contrasena,
+    'ingreso_mensual': (ingresoMensual * 100).round(),
     });
+  }
+
+  Future<Map<String, dynamic>?> verificarUsuario(String correo, String contrasena) async {
+  final db = await instance.database;
+  
+  final maps = await db.query(
+    'usuario',
+    where: 'correo = ? AND contrasena = ?',
+    whereArgs: [correo, contrasena],
+  );
+
+  if (maps.isNotEmpty) {
+    return maps.first;
+  }
+    return null;
   }
 
   Future<int> crearMovimiento(Movimiento movimiento) async{
@@ -121,8 +157,10 @@ class DatabaseHelper {
     return result.map((map) => Movimiento.fromMap(map)).toList();
   }
 
+  // static Database? _database;
+
   Future<int> obtenerBalance(int usuarioId) async{
-    final Database db = instance.database as Database;
+    final Database db = await instance.database;
 
     final resultIngresos = await db.rawQuery(
       'SELECT SUM(monto) as total FROM movimiento WHERE usuario_id = ? and tipo = "ingreso"',
@@ -133,8 +171,8 @@ class DatabaseHelper {
       [usuarioId]
     );
 
-    int ingresos = resultIngresos.first['total'] as int;
-    int egresos = resultEgresos.first['total'] as int;
+    int ingresos = (resultIngresos.first['total'] as int?) ?? 0;
+    int egresos = (resultEgresos.first['total'] as int?) ?? 0;
 
     return ingresos - egresos;
   }

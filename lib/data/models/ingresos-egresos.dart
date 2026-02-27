@@ -21,7 +21,7 @@ class Movimiento {
   Map<String, dynamic> toMap(){
     return {
     'id': id,
-    'usuarrio_id': usuario_id,
+    'usuario_id': usuario_id,
     'monto': monto,
     'fecha': fecha.toIso8601String(),
     'tipo': tipo,

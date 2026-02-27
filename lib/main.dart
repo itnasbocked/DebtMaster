@@ -1,5 +1,7 @@
+// import 'package:dm/ui/ingresos_egresos.dart';
 import 'package:flutter/material.dart';
-import 'ui/auth_page.dart';
+// import 'data/database/database_helper.dart';
+// import 'ui/auth_page.dart';
 import 'ui/ingresos_egresos.dart';
 
 
@@ -20,7 +22,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'DebtMaster',
-      home: AuthPage(),
+      home: const IngresosEgresosScreen(),
     );
   }
 }
