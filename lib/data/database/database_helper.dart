@@ -21,10 +21,15 @@ class DatabaseHelper {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
 
+    print("Ubicación de la BD: $path");
+
     return await openDatabase(
       path,
       version: 1,
-      onCreate: _createDB,
+      onCreate: (db, version) async{
+        await _createDB(db, version);
+        print("Base de datos creada exitosamente");
+      }
     );
   }
 
@@ -74,7 +79,7 @@ class DatabaseHelper {
         fecha TEXT NOT NULL,
         tipo TEXT NOT NULL,
         descripcion TEXT,
-        frecuencia TEXT DEFAULT 'ninguna', -- 'diario', 'semanal', 'mensual', etc.
+        frecuencia TEXT NOT NULL DEFAULT 'ninguna', -- 'diario', 'semanal', 'mensual', etc.
         FOREIGN KEY (usuario_id) REFERENCES usuario(id)
       )
     ''');
@@ -93,16 +98,25 @@ class DatabaseHelper {
   
   }
 
+  //Funciones CRUD para usuarios
+
+  Future<int> crearUsuario(String nombre, int ingreso) async{
+    final db = await instance.database;
+    return await db.insert('usuario', {
+      'nombre': nombre
+    });
+  }
+
   Future<int> crearMovimiento(Movimiento movimiento) async{
     final db = await instance.database;
     return await db.insert('movimiento', movimiento.toMap());
   }
 
-  Future<List<Movimiento>> consultarMovimientos(int usuario_id) async{
+  Future<List<Movimiento>> consultarMovimientos(int usuarioId) async{
     final db = await instance.database;
     final result = await db.query('movimiento',
     where: 'usuario_id = ?',
-    whereArgs: [usuario_id],
+    whereArgs: [usuarioId],
     orderBy: 'fecha DESC');
     return result.map((map) => Movimiento.fromMap(map)).toList();
   }
@@ -119,8 +133,8 @@ class DatabaseHelper {
       [usuarioId]
     );
 
-    int ingresos = resultIngresos.first['total'] as int ?? 0;
-    int egresos = resultEgresos.first['total'] as int ?? 0;
+    int ingresos = resultIngresos.first['total'] as int;
+    int egresos = resultEgresos.first['total'] as int;
 
     return ingresos - egresos;
   }

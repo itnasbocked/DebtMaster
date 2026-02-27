@@ -6,12 +6,13 @@ class MovimientoController{
     required String montoRaw,
     required String descripcion,
     required String tipo,
+    required String frecuencia,
     required int usuarioId,
   }) async{
     try{
       if (montoRaw.isEmpty) return 'El monto no puede estar vacío';
-      final montoDecimal = double.tryParse(montoRaw);
-      if (montoDecimal == null || montoDecimal <= 0) return 'Monto inválido. Debe ser un número positivo.';
+      final montoDecimal = double.tryParse(montoRaw) ?? 0.0;
+      if (montoDecimal <= 0) return 'Monto inválido. Debe ser un número positivo.';
       int montoCentavos = (montoDecimal * 100).round();
 
       final nuevoMovimiento = Movimiento(usuario_id: usuarioId, monto: montoCentavos, fecha: DateTime.now(), tipo: tipo,
