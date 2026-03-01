@@ -10,44 +10,167 @@ class IngresosEgresosScreen extends StatefulWidget {
   State<IngresosEgresosScreen> createState() => _IngresosEgresosScreenState();
 }
 
-class HistorialScreen extends StatelessWidget {
-
+class HistorialScreen extends StatefulWidget {
   final List<Movimiento> movimientos;
 
   const HistorialScreen(this.movimientos, {super.key});
+
+  @override
+  State<HistorialScreen> createState() => _HistorialScreenState();
+}
+
+class _HistorialScreenState extends State<HistorialScreen> {
+  final MovimientoController _logic = MovimientoController();
+  
+  late List<Movimiento> listaMutable;
+
+  @override
+  void initState() {
+    super.initState();
+    listaMutable = List.from(widget.movimientos);
+  }
 
   bool esDelMesActual(DateTime fecha) {
     DateTime now = DateTime.now();
     return fecha.month == now.month && fecha.year == now.year;
   }
 
+  int idUsuario = 1;
+  List<Movimiento> movimientos = [];
+  double balanceTotal = 0.0;
+
+  Future<void> _recargarDatos() async {
+    final list = await _logic.obtenerMovimientos(idUsuario);
+    final balance = await _logic.formatearBalance(idUsuario);
+    setState(() {
+      movimientos = list;
+      balanceTotal = balance;
+    });
+  }
+
+
+  void _borrarMovimiento(int index, int idBaseDatos) async {
+    // Borrado del backend
+    await _logic.borrarMovimiento(idBaseDatos);
+    
+    // Eliminación de la UI
+    setState(() {
+      listaMutable.removeAt(index);
+    });
+    _recargarDatos();
+  }
+
   @override
   Widget build(BuildContext context) {
-
-    var listaMes = movimientos
-        .where((m) => esDelMesActual(m.fecha))
-        .toList();
+    var listaMes = listaMutable.where((m) => esDelMesActual(m.fecha)).toList();
 
     return Scaffold(
-      appBar: AppBar(title: Text("Historial del Mes")),
-      body: ListView.builder(
-        itemCount: listaMes.length,
-        itemBuilder: (_, index) {
-          var m = listaMes[index];
-          return ListTile(
-            title: Text(m.descripcion ?? "Sin descripción"),
-            subtitle: Text(m.fecha.toString()),
-            trailing: Text(
-              "\$${(m.monto / 100).toStringAsFixed(2)}",
-              style: TextStyle(
-                color: m.tipo == "ingreso"
-                    ? Colors.green
-                    : Colors.red,
-                fontWeight: FontWeight.bold,
-              ),
+      appBar: AppBar(
+        title: const Text("Historial del Mes"),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        foregroundColor: Colors.black,
+      ),
+      body: listaMes.isEmpty
+          ? const Center(child: Text("No hay movimientos este mes."))
+          : ListView.builder(
+              itemCount: listaMes.length,
+              itemBuilder: (_, index) {
+                var m = listaMes[index];
+                bool esIngreso = m.tipo == "ingreso";
+
+                String dia = m.fecha.day.toString().padLeft(2, '0');
+                String mes = m.fecha.month.toString().padLeft(2, '0');
+                String anio = m.fecha.year.toString();
+                String fechaLimpia = "$dia/$mes/$anio";
+
+                return ListTile(
+                  title: Text(
+                    m.descripcion ?? "Sin descripción", 
+                    style: const TextStyle(fontWeight: FontWeight.bold)
+                  ),
+                  subtitle: Text(fechaLimpia),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        "\$${(m.monto / 100).toStringAsFixed(2)}",
+                        style: TextStyle(
+                          color: esIngreso ? Colors.green : Colors.red,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      IconButton(
+                        icon: const Icon(Icons.edit_outlined, color: Colors.blueAccent),
+                        onPressed: () => _mostrarDialogoEdicion(m, index),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, color: Colors.red),
+                        onPressed: () {
+                          int originalIndex = listaMutable.indexOf(m);
+                          _borrarMovimiento(originalIndex, m.id!);
+                        },
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                    ],
+                  ),);
+              },
             ),
-          );
-        },
+    );
+  }
+  
+  void _mostrarDialogoEdicion(Movimiento m, int index) {
+    // Precargamos los controladores con los datos actuales del disco
+    TextEditingController mC = TextEditingController(text: (m.monto / 100).toStringAsFixed(2));
+    TextEditingController dC = TextEditingController(text: m.descripcion);
+
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text("Editar Movimiento"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: mC, 
+              keyboardType: TextInputType.number, 
+              decoration: const InputDecoration(labelText: "Nuevo Monto")
+            ),
+            TextField(
+              controller: dC, 
+              decoration: const InputDecoration(labelText: "Nueva Descripción")
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context), 
+            child: const Text("Cancelar", style: TextStyle(color: Colors.grey))
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
+            onPressed: () async {
+              bool exito = await _logic.actualizarMovimiento(m.id!, mC.text, dC.text);
+              
+              if (exito) {
+                setState(() {
+                  double nuevoValor = double.parse(mC.text);
+                  m.monto = (nuevoValor * 100).round();
+                  m.descripcion = dC.text;
+                  listaMutable[index] = m;
+                });
+                Navigator.pop(context);
+              }
+            },
+            child: const Text("Actualizar"),
+          )
+        ],
       ),
     );
   }
@@ -60,9 +183,9 @@ class _IngresosEgresosScreenState extends State<IngresosEgresosScreen> {
   double balanceTotal = 0.0;
   int idUsuario = 1;
   
-  final Color primaryBlue = const Color(0xFF2962FF);    // Azul Principal
-  final Color secondaryGreen = const Color(0xFF00C853); // Verde Secundario
-  final Color criticalRed = const Color(0xFFF44336);    // Rojo Crítico
+  final Color primaryBlue = const Color(0xFF2563EB);    // Azul Principal
+  final Color secondaryGreen = const Color(0xFF6BC88E); // Verde Secundario
+  final Color criticalRed = const Color(0xFFDA3838);    // Rojo Crítico
   final Color backgroundColor = const Color(0xFFF2F4F7); // Fondo suave
 
   @override
@@ -181,7 +304,7 @@ class _IngresosEgresosScreenState extends State<IngresosEgresosScreen> {
             child: CircularProgressIndicator(
               value: ratio.clamp(0.0, 1.0),
               strokeWidth: 10,
-              backgroundColor: Colors.lightBlue,
+              backgroundColor: Color(0xFF111827),
               valueColor: AlwaysStoppedAnimation(color),
             ),
           ),

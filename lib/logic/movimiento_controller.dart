@@ -44,4 +44,37 @@ class MovimientoController{
       return [];
     }
   }
+
+  Future<bool> actualizarMovimiento(int id, String montoRaw, String descripcion) async {
+    try {
+      double valor = double.tryParse(montoRaw) ?? 0.0;
+      if (valor <= 0) return false;
+
+      int montoCentavos = (valor * 100).round();
+      final db = await DatabaseHelper.instance.database;
+      
+      await db.update(
+        'movimiento',
+        {
+          'monto': montoCentavos,
+          'descripcion': descripcion,
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      return true;
+    } catch (e) {
+        print("Error al actualizar: $e");
+      return false;
+    }
+  }
+
+  Future<void> borrarMovimiento(int id) async {
+    final db = await DatabaseHelper.instance.database;
+    await db.delete(
+      'movimiento',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
 }
