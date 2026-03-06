@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'ingresos_egresos.dart'; // Para la navegación
+import 'ingresos_egresos_screen.dart'; // Para la navegación
 
 class AuthPage extends StatefulWidget {
   const AuthPage({super.key});

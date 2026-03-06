@@ -122,6 +122,8 @@ class _HistorialScreenState extends State<HistorialScreen> {
                   ),);
               },
             ),
+
+            
     );
   }
   
@@ -243,7 +245,6 @@ class _IngresosEgresosScreenState extends State<IngresosEgresosScreen> {
         ),
       ),
 
-      bottomNavigationBar: _buildBottomNav(),
     );
   }
 
@@ -320,60 +321,6 @@ class _IngresosEgresosScreenState extends State<IngresosEgresosScreen> {
     );
   }
 
-int _selectedIndex = 2; 
-
-Widget _buildBottomNav() {
-  return Container(
-    decoration: BoxDecoration(
-      color: Colors.white,
-      boxShadow: [
-        BoxShadow(
-          color: Colors.black.withOpacity(0.05),
-          blurRadius: 10,
-          offset: const Offset(0, -5), // Sombra sutil hacia arriba
-        ),
-      ],
-    ),
-    child: BottomNavigationBar(
-      currentIndex: _selectedIndex,
-      onTap: (index) {
-        setState(() => _selectedIndex = index);
-        // Santiago: Aquí puedes meter la lógica de navegación por index
-      },
-      selectedItemColor: primaryBlue,      // Azul #2962FF
-      unselectedItemColor: Colors.grey.shade400,
-      showSelectedLabels: false,
-      showUnselectedLabels: false,
-      type: BottomNavigationBarType.fixed, // Bloquea los iconos para que no "salten"
-      items: const [
-        // 1. Calendario
-        BottomNavigationBarItem(
-          icon: Icon(Icons.calendar_today_outlined, size: 26),
-          activeIcon: Icon(Icons.calendar_today, size: 26),
-          label: "Calendario",
-        ),
-        // 2. Tarjetas (Pagos TDC)
-        BottomNavigationBarItem(
-            icon: Icon(Icons.credit_card_outlined, size: 28),
-          activeIcon: Icon(Icons.credit_card, size: 28),
-          label: "Tarjetas",
-        ),
-        // 3. Billetera (Dashboard principal)
-        BottomNavigationBarItem(
-          icon: Icon(Icons.account_balance_wallet_outlined, size: 28),
-          activeIcon: Icon(Icons.account_balance_wallet, size: 28),
-          label: "Billetera",
-        ),
-        // 4. Metas (Objetivos de ahorro)
-        BottomNavigationBarItem(
-          icon: Icon(Icons.outlined_flag, size: 28),
-          activeIcon: Icon(Icons.flag, size: 28),
-          label: "Metas",
-        ),
-      ],
-    ),
-  );
-}
   double _calcularSuma(String tipo) {
     int total = movimientos.where((m) => m.tipo == tipo).fold(0, (sum, m) => sum + m.monto);
     return total / 100.0;

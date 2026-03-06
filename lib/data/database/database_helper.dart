@@ -21,14 +21,11 @@ class DatabaseHelper {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
 
-    print("Ubicación de la BD: $path");
-
     return await openDatabase(
       path,
       version: 1,
       onCreate: (db, version) async{
         await _createDB(db, version);
-        print("Base de datos creada exitosamente");
       }
     );
   }
@@ -92,9 +89,6 @@ class DatabaseHelper {
     'contrasena': 'admin123',
     'ingreso_mensual': 1000000, // $10,000.00 en centavos
     });
-
-    final result = await db.query('usuario');
-    print(result);
 
     // 5. Tabla de Alertas
     await db.execute('''
