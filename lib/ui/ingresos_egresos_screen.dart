@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 // import '../data/database/database_helper.dart';
-import '../data/models/ingresos-egresos.dart';
+import '../data/models/ingresos-egresos_model.dart';
 import '../logic/movimiento_controller.dart';
 
 class IngresosEgresosScreen extends StatefulWidget {
@@ -216,8 +216,10 @@ class _IngresosEgresosScreenState extends State<IngresosEgresosScreen> {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Text(
-                "DebtMaster",
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: primaryBlue),
+                "Ingresos y Egresos",
+                style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 32),
 
@@ -305,7 +307,7 @@ class _IngresosEgresosScreenState extends State<IngresosEgresosScreen> {
             child: CircularProgressIndicator(
               value: ratio.clamp(0.0, 1.0),
               strokeWidth: 10,
-              backgroundColor: Color(0xFF111827),
+              backgroundColor: Color(0xCC111827),
               valueColor: AlwaysStoppedAnimation(color),
             ),
           ),

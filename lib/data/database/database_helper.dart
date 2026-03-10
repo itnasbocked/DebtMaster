@@ -101,6 +101,19 @@ class DatabaseHelper {
         FOREIGN KEY (usuario_id) REFERENCES usuario(id)
         )
     ''');
+
+    await db.execute( '''
+      CREATE TABLE meta(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        usuario_id INTEGER NOT NULL,
+        nombre TEXT NOT NULL,
+        monto_objetivo INTEGER NOT NULL
+        monto_actual INTEGER NOT NULL DEFAULT 0,
+        fecha_limite TEXT NOT NULL,
+        icono TEXT NOT NULL,
+        FOREIGN KEY (usuario_id) REFERENCES usuario(id)
+      )
+    ''');
   
   }
 
