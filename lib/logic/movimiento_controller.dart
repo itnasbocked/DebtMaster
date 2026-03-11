@@ -1,5 +1,5 @@
 import '../data/database/database_helper.dart';
-import '../data/models/ingresos-egresos.dart';
+import '../data/models/ingresos-egresos_model.dart';
 
 class MovimientoController{
   Future<String> registrarMovimiento({

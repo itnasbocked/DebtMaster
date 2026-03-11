@@ -3,49 +3,49 @@ import 'package:intl/intl.dart';
 import '../data/models/meta_model.dart';
 import '../data/database/database_helper.dart';
 
-class MetasScreen extends StatefulWidget{
+class MetasScreen extends StatefulWidget {
   const MetasScreen({super.key});
 
   @override
   State<MetasScreen> createState() => _MetasScreenState();
 }
 
-class _MetasScreenState extends State<MetasScreen>{
-  List <Meta> metas = [];
-  final Color primaryBlue = const Color(0xFF2563EB);    // Azul Principal
-  final Color secondaryGreen = const Color(0xFF6BC88E); // Verde Secundario
+class _MetasScreenState extends State<MetasScreen> {
+  List<Meta> metas = [];
+  final Color primaryBlue = const Color(0xFF2563EB);
+  final Color secondaryGreen = const Color(0xFF6BC88E);
 
   final int idUsuarioActual = 1;
 
-  @override void initState() {
+  @override
+  void initState() {
     super.initState();
     _cargarMetas();
   }
-}
 
   Future<void> _cargarMetas() async {
     final db = await DatabaseHelper.instance.database;
     final result = await db.query('meta', where: 'usuario_id = ?', whereArgs: [idUsuarioActual]);
-    setState((){
+    setState(() {
       metas = result.map((map) => Meta.fromMap(map)).toList();
     });
+  }
 
   Future<void> _guardarNuevaMeta(Meta nuevaMeta) async {
     final db = await DatabaseHelper.instance.database;
-    final db.insert('meta', nuevaMeta.toMap());
-    _cargarMetas();
-  }
+    await db.insert('meta', nuevaMeta.toMap());
+    await _cargarMetas();
+    }
 
   Future<void> _abonarMeta(Meta meta, int centavosAhorro) async {
     final db = await DatabaseHelper.instance.database;
-    int nuevoMonto = meta.montoActual + cantidadCentavos;
-    if (nuevoMonto > meta.montoObjetivo) nuevoMonto = meta.montoObjetivo; // Tope al 100%
+    int nuevoMonto = meta.montoActual + centavosAhorro;
+    if (nuevoMonto > meta.montoObjetivo) nuevoMonto = meta.montoObjetivo;
 
     await db.update('meta', {'monto_actual': nuevoMonto}, where: 'id = ?', whereArgs: [meta.id]);
-    _cargarMetas();
+    await _cargarMetas();
   }
 
-  // --- INTERFAZ GRÁFICA ---
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -54,13 +54,8 @@ class _MetasScreenState extends State<MetasScreen>{
         title: const Text("Metas", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 28, color: Colors.black)),
         backgroundColor: Colors.transparent,
         elevation: 0,
-        actions: [
-          IconButton(
-            icon: Icon(Icons.add_circle_outline, color: Colors.black, size: 30),
-            onPressed: _mostrarDialogoNuevaMeta,
-          )
-        ],
       ),
+      
       body: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 24),
         child: Column(
@@ -72,6 +67,7 @@ class _MetasScreenState extends State<MetasScreen>{
               child: ListView.builder(
                 itemCount: metas.length + 1, // +1 para la tarjeta de "Crear nueva"
                 itemBuilder: (context, index) {
+                  // La última tarjeta siempre será la de crear una nueva meta
                   if (index == metas.length) return _buildBotonCrearMeta();
                   return _buildTarjetaMeta(metas[index]);
                 },
@@ -80,20 +76,15 @@ class _MetasScreenState extends State<MetasScreen>{
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: primaryBlue,
-        onPressed: _mostrarDialogoNuevaMeta,
-        child: const Icon(Icons.add, color: Colors.white),
-      ),
     );
   }
 
-  Widget _buildTarjetaMeta(MetaAhorro meta) {
+  Widget _buildTarjetaMeta(Meta meta) {
     double progreso = meta.montoObjetivo == 0 ? 0 : meta.montoActual / meta.montoObjetivo;
     int porcentaje = (progreso * 100).toInt();
 
     return GestureDetector(
-      onTap: () => _mostrarDialogoAbono(meta), // Tocar la tarjeta para añadirle dinero
+      onTap: () => _mostrarDialogoAbono(meta), 
       child: Container(
         margin: const EdgeInsets.only(bottom: 20),
         padding: const EdgeInsets.all(24),
@@ -119,7 +110,7 @@ class _MetasScreenState extends State<MetasScreen>{
                 value: progreso.clamp(0.0, 1.0),
                 minHeight: 12,
                 backgroundColor: Colors.grey.shade200,
-                valueColor: AlwaysStoppedAnimation(successGreen),
+                valueColor: AlwaysStoppedAnimation(secondaryGreen),
               ),
             ),
             const SizedBox(height: 16),
@@ -156,63 +147,85 @@ class _MetasScreenState extends State<MetasScreen>{
     );
   }
 
-  // --- DIÁLOGOS DE CAPTURA ---
   void _mostrarDialogoNuevaMeta() {
     TextEditingController nC = TextEditingController();
     TextEditingController mC = TextEditingController();
-    TextEditingController iC = TextEditingController(text: "👾"); // Emoji por defecto
+    
+    String iconoSeleccionado = "👾"; 
+    final List<String> opcionesIconos = ["👾", "💻", "🚗", "✈️", "🏠", "📱", "🎓", "🎮", "🎸", "💰"];
 
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text("Nueva Meta"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(controller: iC, decoration: const InputDecoration(labelText: "Icono (Emoji)")),
-            TextField(controller: nC, decoration: const InputDecoration(labelText: "Nombre (Ej: PC Gamer)")),
-            TextField(controller: mC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Monto Objetivo (\$)")),
-          ],
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () {
-              double monto = double.tryParse(mC.text) ?? 0;
-              if (monto > 0 && nC.text.isNotEmpty) {
-                _guardarNuevaMeta(MetaAhorro(
-                  usuarioId: idUsuarioActual,
-                  nombre: nC.text,
-                  montoObjetivo: (monto * 100).round(),
-                  fechaLimite: DateTime.now().add(const Duration(days: 180)), // 6 meses por defecto para MVP
-                  icono: iC.text,
-                ));
-                Navigator.pop(context);
-              }
-            },
-            child: const Text("Guardar"),
-          )
-        ],
-      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            return AlertDialog(
+              title: const Text("Nueva Meta"),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DropdownButtonFormField<String>(
+                    value: iconoSeleccionado,
+                    decoration: const InputDecoration(labelText: "Icono de la meta"),
+                    items: opcionesIconos.map((String emoji) {
+                      return DropdownMenuItem(
+                        value: emoji,
+                        child: Text(emoji, style: const TextStyle(fontSize: 24)),
+                      );
+                    }).toList(),
+                    onChanged: (String? nuevoValor) {
+                      setStateDialog(() {
+                        if (nuevoValor != null) iconoSeleccionado = nuevoValor;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(controller: nC, decoration: const InputDecoration(labelText: "Nombre (Ej: PC Gamer)")),
+                  TextField(controller: mC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Monto Objetivo (\$)")),
+                ],
+              ),
+              actions: [
+                ElevatedButton(
+                  onPressed: () async {
+                    double monto = double.tryParse(mC.text) ?? 0;
+                    if (monto > 0 && nC.text.isNotEmpty) {
+                      await _guardarNuevaMeta(Meta(
+                        usuarioId: idUsuarioActual,
+                        nombre: nC.text,
+                        montoObjetivo: (monto * 100).round(),
+                        fechaLimite: DateTime.now().add(const Duration(days: 180)),
+                        icono: iconoSeleccionado,
+                      ));
+                      Navigator.pop(context);
+                    }
+                  },
+                  child: const Text("Guardar"),
+                )
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
-  void _mostrarDialogoAbono(MetaAhorro meta) {
+  void _mostrarDialogoAbono(Meta meta) {
     TextEditingController aC = TextEditingController();
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
         title: Text("Abonar a ${meta.nombre}"),
         content: TextField(
-          controller: aC, 
-          keyboardType: TextInputType.number, 
+          controller: aC,
+          keyboardType: TextInputType.number,
           decoration: const InputDecoration(labelText: "Cantidad a sumar (\$)", prefixText: "\$ ")
         ),
         actions: [
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               double abono = double.tryParse(aC.text) ?? 0;
               if (abono > 0) {
-                _abonarAMeta(meta, (abono * 100).round());
+                await _abonarMeta(meta, (abono * 100).round());
                 Navigator.pop(context);
               }
             },

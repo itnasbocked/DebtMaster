@@ -1,6 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
-import '../models/ingresos-egresos.dart';
+import '../models/ingresos-egresos_model.dart';
 
 class DatabaseHelper {
 
@@ -102,12 +102,13 @@ class DatabaseHelper {
         )
     ''');
 
+    // 6. Tabla de Metas
     await db.execute( '''
       CREATE TABLE meta(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         usuario_id INTEGER NOT NULL,
         nombre TEXT NOT NULL,
-        monto_objetivo INTEGER NOT NULL
+        monto_objetivo INTEGER NOT NULL,
         monto_actual INTEGER NOT NULL DEFAULT 0,
         fecha_limite TEXT NOT NULL,
         icono TEXT NOT NULL,

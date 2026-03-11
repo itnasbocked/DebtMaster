@@ -5,7 +5,7 @@ class Meta{
     int montoObjetivo;
     int montoActual;
     DateTime fechaLimite;
-    String icono
+    String icono;
 
     Meta({
         this.id,
@@ -13,7 +13,7 @@ class Meta{
         required this.nombre,
         required this.montoObjetivo,
         this.montoActual = 0,
-        required this fechaLimite,
+        required this.fechaLimite,
         required this.icono,
     });
 
