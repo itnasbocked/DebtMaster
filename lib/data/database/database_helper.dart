@@ -31,7 +31,7 @@ class DatabaseHelper {
   }
 
   Future _createDB(Database db, int version) async {
-    // 1. Tabla de Usuarios (Monto en INTEGER)
+    // 1. Tabla de Usuarios
     await db.execute('''
       CREATE TABLE usuario (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,7 +42,7 @@ class DatabaseHelper {
       )
     ''');
 
-    // 2. Tabla de Tarjetas (Monto en INTEGER)
+    // 2. Tabla de Tarjetas
     await db.execute('''
       CREATE TABLE tarjeta (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,7 +56,7 @@ class DatabaseHelper {
       )
     ''');
 
-    // 3. Tabla de Gastos Fijos (Monto en INTEGER)
+    // 3. Tabla de Gastos Fijos
     await db.execute('''
       CREATE TABLE gasto_fijo (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -87,7 +87,7 @@ class DatabaseHelper {
     'nombre': 'Admin',
     'correo': 'admin@debtmaster.com',
     'contrasena': 'admin123',
-    'ingreso_mensual': 1000000, // $10,000.00 en centavos
+    'ingreso_mensual': 1000000, // En centavos
     });
 
     // 5. Tabla de Alertas
@@ -113,6 +113,17 @@ class DatabaseHelper {
         fecha_limite TEXT NOT NULL,
         icono TEXT NOT NULL,
         FOREIGN KEY (usuario_id) REFERENCES usuario(id)
+      )
+    ''');
+
+    // 7. Tabla de Historial de Aportes a Metas
+    await db.execute('''
+      CREATE TABLE aporte_meta (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        meta_id INTEGER NOT NULL,
+        monto INTEGER NOT NULL,
+        fecha TEXT NOT NULL,
+        FOREIGN KEY (meta_id) REFERENCES meta(id) ON DELETE CASCADE
       )
     ''');
   
