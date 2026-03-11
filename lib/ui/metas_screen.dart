@@ -24,6 +24,7 @@ class _MetasScreenState extends State<MetasScreen> {
     _cargarMetas();
   }
 
+  // --- 1. LÓGICA DE BASE DE DATOS (CRUD) ---
   Future<void> _cargarMetas() async {
     final db = await DatabaseHelper.instance.database;
     final result = await db.query('meta', where: 'usuario_id = ?', whereArgs: [idUsuarioActual]);
@@ -36,7 +37,20 @@ class _MetasScreenState extends State<MetasScreen> {
     final db = await DatabaseHelper.instance.database;
     await db.insert('meta', nuevaMeta.toMap());
     await _cargarMetas();
-    }
+  }
+
+  Future<void> _actualizarMeta(Meta metaEditada) async {
+    final db = await DatabaseHelper.instance.database;
+    await db.update('meta', metaEditada.toMap(), where: 'id = ?', whereArgs: [metaEditada.id]);
+    await _cargarMetas();
+  }
+
+  Future<void> _eliminarMeta(int idMeta) async {
+    final db = await DatabaseHelper.instance.database;
+    await db.delete('aporte_meta', where: 'meta_id = ?', whereArgs: [idMeta]);
+    await db.delete('meta', where: 'id = ?', whereArgs: [idMeta]);
+    await _cargarMetas();
+  }
 
   Future<void> _abonarMeta(Meta meta, int centavosAhorro) async {
     final db = await DatabaseHelper.instance.database;
@@ -50,13 +64,11 @@ class _MetasScreenState extends State<MetasScreen> {
     if (nuevoMonto > meta.montoObjetivo) nuevoMonto = meta.montoObjetivo;
 
     await db.update('meta', {'monto_actual': nuevoMonto}, where: 'id = ?', whereArgs: [meta.id]);
-    
     await _cargarMetas();
   }
 
   Future<List<AporteMeta>> _obtenerHistorial(int metaId) async {
     final db = await DatabaseHelper.instance.database;
-    // Traemos los datos ordenados del más reciente al más antiguo
     final result = await db.query(
       'aporte_meta', 
       where: 'meta_id = ?', 
@@ -66,16 +78,11 @@ class _MetasScreenState extends State<MetasScreen> {
     return result.map((map) => AporteMeta.fromMap(map)).toList();
   }
 
+  // --- 2. INTERFAZ GRÁFICA ---
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF2F4F7),
-      appBar: AppBar(
-        title: const Text("Metas", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 28, color: Colors.black)),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-      ),
-      
+      backgroundColor: Colors.transparent, // Deja que el color del MainScreen brille
       body: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 24),
         child: Column(
@@ -85,9 +92,8 @@ class _MetasScreenState extends State<MetasScreen> {
             const SizedBox(height: 20),
             Expanded(
               child: ListView.builder(
-                itemCount: metas.length + 1, // +1 para la tarjeta de "Crear nueva"
+                itemCount: metas.length + 1,
                 itemBuilder: (context, index) {
-                  // La última tarjeta siempre será la de crear una nueva meta
                   if (index == metas.length) return _buildBotonCrearMeta();
                   return _buildTarjetaMeta(metas[index]);
                 },
@@ -170,248 +176,12 @@ class _MetasScreenState extends State<MetasScreen> {
     );
   }
 
-  void _mostrarDialogoNuevaMeta() {
-    TextEditingController nC = TextEditingController();
-    TextEditingController mC = TextEditingController();
-    
-    String iconoSeleccionado = "👾"; 
-    final List<String> opcionesIconos = ["👾", "💻", "🚗", "✈️", "🏠", "📱", "🎓", "🎮", "🎸", "💰"];
-    
-    // Fecha por defecto -> 1 mes a partir de hoy
-    DateTime fechaSeleccionada = DateTime.now().add(const Duration(days: 30)); 
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setStateDialog) {
-            return AlertDialog(
-              title: const Text("Nueva Meta"),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  DropdownButtonFormField<String>(
-                    value: iconoSeleccionado,
-                    decoration: const InputDecoration(labelText: "Icono de la meta"),
-                    items: opcionesIconos.map((String emoji) {
-                      return DropdownMenuItem(
-                        value: emoji,
-                        child: Text(emoji, style: const TextStyle(fontSize: 24)),
-                      );
-                    }).toList(),
-                    onChanged: (String? nuevoValor) {
-                      setStateDialog(() {
-                        if (nuevoValor != null) iconoSeleccionado = nuevoValor;
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(controller: nC, decoration: const InputDecoration(labelText: "Nombre (Ej: PC Gamer)")),
-                  const SizedBox(height: 8),
-                  TextField(controller: mC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Monto Objetivo (\$)")),
-                  const SizedBox(height: 20),
-                  
-                  Row(
-                    children: [
-                      const Icon(Icons.calendar_today_outlined, color: Colors.grey, size: 20),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text("Fecha límite", style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-                            Text(
-                              DateFormat('dd MMM yyyy').format(fechaSeleccionada),
-                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
-                            ),
-                          ],
-                        ),
-                      ),
-                      TextButton(
-                        style: TextButton.styleFrom(foregroundColor: primaryBlue),
-                        onPressed: () async {
-                          // Calendario nativo del dispositivo
-                          DateTime? seleccion = await showDatePicker(
-                            context: context,
-                            initialDate: fechaSeleccionada,
-                            firstDate: DateTime.now(), // Bloqueo para no permitir fechas pasadas
-                            lastDate: DateTime(2100),  // Tope máximo
-                          );
-                          if (seleccion != null) {
-                            setStateDialog(() {
-                              fechaSeleccionada = seleccion;
-                            });
-                          }
-                        },
-                        child: const Text("Cambiar"),
-                      )
-                    ],
-                  ),
-                ],
-              ),
-              actions: [
-                ElevatedButton(
-                  onPressed: () async {
-                    double monto = double.tryParse(mC.text) ?? 0;
-                    if (monto > 0 && nC.text.isNotEmpty) {
-                      await _guardarNuevaMeta(Meta(
-                        usuarioId: idUsuarioActual,
-                        nombre: nC.text,
-                        montoObjetivo: (monto * 100).round(),
-                        fechaLimite: fechaSeleccionada,
-                        icono: iconoSeleccionado,
-                      ));
-                      Navigator.pop(context);
-                    }
-                  },
-                  child: const Text("Guardar"),
-                )
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  // void _mostrarDialogoAbono(Meta meta) {
-  //   TextEditingController aC = TextEditingController();
-  //   double progreso = meta.montoObjetivo == 0 ? 0 : meta.montoActual / meta.montoObjetivo;
-  //   int porcentaje = (progreso * 100).toInt();
-
-  //   showModalBottomSheet(
-  //     context: context,
-  //     isScrollControlled: true, 
-  //     backgroundColor: Colors.transparent,
-  //     builder: (context) {
-  //       return Container(
-  //         height: MediaQuery.of(context).size.height * 0.85,
-  //         padding: EdgeInsets.only(
-  //           top: 32, left: 24, right: 24,
-  //           bottom: MediaQuery.of(context).viewInsets.bottom + 24, 
-  //         ),
-  //         decoration: const BoxDecoration(
-  //           color: Color(0xFFF4F6FA),
-  //           borderRadius: BorderRadius.only(topLeft: Radius.circular(32), topRight: Radius.circular(32)),
-  //         ),
-  //         child: Column(
-  //           crossAxisAlignment: CrossAxisAlignment.start,
-  //           children: [
-  //             Text(
-  //               "${meta.nombre} ${meta.icono}",
-  //               style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
-  //             ),
-  //             const SizedBox(height: 5),
-  //             Text(
-  //               "$porcentaje% completado",
-  //               style: const TextStyle(color: Colors.grey, fontSize: 16),
-  //             ),
-  //             const SizedBox(height: 25),
-
-  //             Container(
-  //               padding: const EdgeInsets.all(20),
-  //               decoration: BoxDecoration(
-  //                 color: Colors.white,
-  //                 borderRadius: BorderRadius.circular(20),
-  //                 boxShadow: [
-  //                   BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 5))
-  //                 ],
-  //               ),
-  //               child: Row(
-  //                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
-  //                 children: List.generate(6, (index) {
-  //                   List<double> alturas = [0.4, 0.5, 0.3, 0.8, 0.6, 0.9];
-  //                   List<String> meses = ["Ene", "Feb", "Mar", "Abr", "May", "Jun"];
-                    
-  //                   return Column(
-  //                     children: [
-  //                       Container(
-  //                         height: 100, width: 18,
-  //                         alignment: Alignment.bottomCenter,
-  //                         decoration: BoxDecoration(
-  //                           color: Colors.grey.shade200, 
-  //                           borderRadius: BorderRadius.circular(20)
-  //                         ),
-  //                         child: Container(
-  //                           height: 100 * alturas[index],
-  //                           width: 18,
-  //                           decoration: BoxDecoration(
-  //                             color: const Color(0xFF22C55E),
-  //                             borderRadius: BorderRadius.circular(20)
-  //                           ),
-  //                         ),
-  //                       ),
-  //                       const SizedBox(height: 8),
-  //                       Text(meses[index], style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
-  //                     ],
-  //                   );
-  //                 }),
-  //               ),
-  //             ),
-
-  //             const SizedBox(height: 25),
-  //             const Text("Aportaciones", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-  //             const SizedBox(height: 15),
-
-  //             Expanded(
-  //               child: ListView(
-  //                 children: [
-  //                   AporteItem(
-  //                     mes: "Total acumulado", 
-  //                     monto: "+\$${(meta.montoActual / 100).toStringAsFixed(0)}"
-  //                   ),
-  //                   const AporteItem(mes: "Mes anterior", monto: "+\$0"),
-  //                 ],
-  //               ),
-  //             ),
-
-  //             const SizedBox(height: 10),
-  //             Row(
-  //               children: [
-  //                 Expanded(
-  //                   child: TextField(
-  //                     controller: aC,
-  //                     keyboardType: TextInputType.number,
-  //                     decoration: InputDecoration(
-  //                       hintText: "Cantidad a abonar",
-  //                       prefixText: "\$ ",
-  //                       filled: true,
-  //                       fillColor: Colors.white,
-  //                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
-  //                     ),
-  //                   ),
-  //                 ),
-  //                 const SizedBox(width: 12),
-  //                 ElevatedButton(
-  //                   style: ElevatedButton.styleFrom(
-  //                     backgroundColor: const Color(0xFF22C55E),
-  //                     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-  //                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-  //                   ),
-  //                   onPressed: () async {
-  //                     double abono = double.tryParse(aC.text) ?? 0;
-  //                     if (abono > 0) {
-  //                       await _abonarMeta(meta, (abono * 100).round());
-  //                       Navigator.pop(context);
-  //                     }
-  //                   },
-  //                   child: const Icon(Icons.add, color: Colors.white),
-  //                 )
-  //               ],
-  //             )
-  //           ],
-  //         ),
-  //       );
-  //     }
-  //   );
-  // }
-
+  // --- 3. DIÁLOGOS Y PANTALLAS MODALES ---
   void _mostrarDetallesMeta(Meta meta, List<AporteMeta> historial) {
     TextEditingController aC = TextEditingController();
     double progreso = meta.montoObjetivo == 0 ? 0 : meta.montoActual / meta.montoObjetivo;
     int porcentaje = (progreso * 100).toInt();
 
-    // --- PROCESAMIENTO DE LA GRÁFICA (Últimos 6 meses) ---
     List<double> alturas = List.filled(6, 0.0);
     List<String> nombresMeses = List.filled(6, "");
     
@@ -420,11 +190,8 @@ class _MetasScreenState extends State<MetasScreen> {
     List<double> montosPorMes = List.filled(6, 0.0);
 
     for (int i = 5; i >= 0; i--) {
-      // Calculamos los últimos 6 meses dinámicamente
       DateTime mesEvaluar = DateTime(ahora.year, ahora.month - i, 1);
       nombresMeses[5 - i] = DateFormat('MMM').format(mesEvaluar);
-
-      // Sumamos todo el dinero ahorrado en ese mes específico
       double sumaMes = 0;
       for(var aporte in historial) {
         if(aporte.fecha.year == mesEvaluar.year && aporte.fecha.month == mesEvaluar.month) {
@@ -432,14 +199,11 @@ class _MetasScreenState extends State<MetasScreen> {
         }
       }
       montosPorMes[5 - i] = sumaMes;
-      if (sumaMes > maxAbono) maxAbono = sumaMes; // Encontramos el mes récord
+      if (sumaMes > maxAbono) maxAbono = sumaMes;
     }
 
-    // Normalizado de las barras
     if (maxAbono > 0) {
-      for(int i = 0; i < 6; i++) {
-        alturas[i] = montosPorMes[i] / maxAbono;
-      }
+      for(int i = 0; i < 6; i++) alturas[i] = montosPorMes[i] / maxAbono;
     }
 
     showModalBottomSheet(
@@ -460,9 +224,36 @@ class _MetasScreenState extends State<MetasScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text("${meta.nombre} ${meta.icono}", style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 5),
-              Text("$porcentaje% completado", style: const TextStyle(color: Colors.grey, fontSize: 16)),
+              // --- TÍTULO CON BOTONES DE EDITAR Y BORRAR A LA DERECHA ---
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text("${meta.nombre} ${meta.icono}", style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 5),
+                        Text("$porcentaje% completado", style: const TextStyle(color: Colors.grey, fontSize: 16)),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.edit_outlined, color: Colors.blueGrey),
+                    onPressed: () {
+                      Navigator.pop(context); 
+                      _mostrarDialogoEditarMeta(meta); 
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                    onPressed: () {
+                      Navigator.pop(context); 
+                      _confirmarEliminacion(meta); 
+                    },
+                  ),
+                ],
+              ),
               const SizedBox(height: 25),
 
               Container(
@@ -482,7 +273,7 @@ class _MetasScreenState extends State<MetasScreen> {
                           alignment: Alignment.bottomCenter,
                           decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(20)),
                           child: Container(
-                            height: 100 * alturas[index], // Altura matemática real
+                            height: 100 * alturas[index],
                             width: 18,
                             decoration: BoxDecoration(color: const Color(0xFF22C55E), borderRadius: BorderRadius.circular(20)),
                           ),
@@ -555,36 +346,267 @@ class _MetasScreenState extends State<MetasScreen> {
       }
     );
   }
-}
 
-class AporteItem extends StatelessWidget {
-    final String mes;
-    final String monto;
-
-    const AporteItem({super.key, required this.mes, required this.monto});
-
-    @override
-    Widget build(BuildContext context) {
-      return Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(15),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(15),
-          boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 5, offset: const Offset(0, 2))
-          ]
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(mes, style: const TextStyle(fontWeight: FontWeight.w500)),
-            Text(
-              monto,
-              style: const TextStyle(color: Color(0xFF22C55E), fontWeight: FontWeight.bold),
-            ),
-          ],
-        ),
-      );
-    }
+  void _confirmarEliminacion(Meta meta) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("¿Eliminar meta?"),
+        content: Text("Estás a punto de borrar '${meta.nombre}' y todo su historial de aportes. Esta acción no se puede deshacer."),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancelar", style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () async {
+              await _eliminarMeta(meta.id!);
+              if (context.mounted) Navigator.pop(context);
+            },
+            child: const Text("Eliminar", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
   }
+
+  void _mostrarDialogoEditarMeta(Meta meta) {
+    TextEditingController nC = TextEditingController(text: meta.nombre);
+    TextEditingController mC = TextEditingController(text: (meta.montoObjetivo / 100).toStringAsFixed(0));
+    String iconoSeleccionado = meta.icono;
+    DateTime fechaSeleccionada = meta.fechaLimite;
+    
+    final List<String> opcionesIconos = ["👾", "💻", "🚗", "✈️", "🏠", "📱", "🎓", "🎮", "🎸", "💰"];
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            return AlertDialog(
+              title: const Text("Editar Meta"),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DropdownButtonFormField<String>(
+                    value: opcionesIconos.contains(iconoSeleccionado) ? iconoSeleccionado : "💰",
+                    decoration: const InputDecoration(labelText: "Icono de la meta"),
+                    items: opcionesIconos.map((String emoji) {
+                      return DropdownMenuItem(
+                        value: emoji,
+                        child: Text(emoji, style: const TextStyle(fontSize: 24)),
+                      );
+                    }).toList(),
+                    onChanged: (String? nuevoValor) {
+                      setStateDialog(() {
+                        if (nuevoValor != null) iconoSeleccionado = nuevoValor;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(controller: nC, decoration: const InputDecoration(labelText: "Nombre")),
+                  const SizedBox(height: 8),
+                  TextField(controller: mC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Monto Objetivo (\$)")),
+                  const SizedBox(height: 20),
+                  
+                  Row(
+                    children: [
+                      const Icon(Icons.calendar_today_outlined, color: Colors.grey, size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text("Fecha límite", style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                            Text(
+                              DateFormat('dd MMM yyyy').format(fechaSeleccionada),
+                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                            ),
+                          ],
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () async {
+                          DateTime? seleccion = await showDatePicker(
+                            context: context,
+                            initialDate: fechaSeleccionada,
+                            firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                            lastDate: DateTime(2100),
+                          );
+                          if (seleccion != null) {
+                            setStateDialog(() => fechaSeleccionada = seleccion);
+                          }
+                        },
+                        child: const Text("Cambiar"),
+                      )
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("Cancelar", style: TextStyle(color: Colors.grey)),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    double monto = double.tryParse(mC.text) ?? 0;
+                    if (monto > 0 && nC.text.isNotEmpty) {
+                      Meta metaActualizada = Meta(
+                        id: meta.id,
+                        usuarioId: meta.usuarioId,
+                        nombre: nC.text,
+                        montoObjetivo: (monto * 100).round(),
+                        montoActual: meta.montoActual, 
+                        fechaLimite: fechaSeleccionada,
+                        icono: iconoSeleccionado,
+                      );
+                      await _actualizarMeta(metaActualizada);
+                      if (context.mounted) Navigator.pop(context);
+                    }
+                  },
+                  child: const Text("Actualizar"),
+                )
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _mostrarDialogoNuevaMeta() {
+    TextEditingController nC = TextEditingController();
+    TextEditingController mC = TextEditingController();
+    
+    String iconoSeleccionado = "👾"; 
+    final List<String> opcionesIconos = ["👾", "💻", "🚗", "✈️", "🏠", "📱", "🎓", "🎮", "🎸", "💰"];
+    DateTime fechaSeleccionada = DateTime.now().add(const Duration(days: 30)); 
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            return AlertDialog(
+              title: const Text("Nueva Meta"),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DropdownButtonFormField<String>(
+                    value: iconoSeleccionado,
+                    decoration: const InputDecoration(labelText: "Icono de la meta"),
+                    items: opcionesIconos.map((String emoji) {
+                      return DropdownMenuItem(
+                        value: emoji,
+                        child: Text(emoji, style: const TextStyle(fontSize: 24)),
+                      );
+                    }).toList(),
+                    onChanged: (String? nuevoValor) {
+                      setStateDialog(() {
+                        if (nuevoValor != null) iconoSeleccionado = nuevoValor;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(controller: nC, decoration: const InputDecoration(labelText: "Nombre (Ej: PC Gamer)")),
+                  const SizedBox(height: 8),
+                  TextField(controller: mC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Monto Objetivo (\$)")),
+                  const SizedBox(height: 20),
+                  
+                  Row(
+                    children: [
+                      const Icon(Icons.calendar_today_outlined, color: Colors.grey, size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text("Fecha límite", style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                            Text(
+                              DateFormat('dd MMM yyyy').format(fechaSeleccionada),
+                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                            ),
+                          ],
+                        ),
+                      ),
+                      TextButton(
+                        style: TextButton.styleFrom(foregroundColor: primaryBlue),
+                        onPressed: () async {
+                          DateTime? seleccion = await showDatePicker(
+                            context: context,
+                            initialDate: fechaSeleccionada,
+                            firstDate: DateTime.now(), 
+                            lastDate: DateTime(2100),  
+                          );
+                          if (seleccion != null) {
+                            setStateDialog(() {
+                              fechaSeleccionada = seleccion;
+                            });
+                          }
+                        },
+                        child: const Text("Cambiar"),
+                      )
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                ElevatedButton(
+                  onPressed: () async {
+                    double monto = double.tryParse(mC.text) ?? 0;
+                    if (monto > 0 && nC.text.isNotEmpty) {
+                      await _guardarNuevaMeta(Meta(
+                        usuarioId: idUsuarioActual,
+                        nombre: nC.text,
+                        montoObjetivo: (monto * 100).round(),
+                        fechaLimite: fechaSeleccionada,
+                        icono: iconoSeleccionado,
+                      ));
+                      Navigator.pop(context);
+                    }
+                  },
+                  child: const Text("Guardar"),
+                )
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+} // <--- AQUÍ CIERRA LA CLASE DEL STATE CORRECTAMENTE
+
+// --- 4. WIDGETS EXTERNOS REUTILIZABLES ---
+class AporteItem extends StatelessWidget {
+  final String mes;
+  final String monto;
+
+  const AporteItem({super.key, required this.mes, required this.monto});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(15),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 5, offset: const Offset(0, 2))
+        ]
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(mes, style: const TextStyle(fontWeight: FontWeight.w500)),
+          Text(
+            monto,
+            style: const TextStyle(color: Color(0xFF22C55E), fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
+    );
+  }
+}

@@ -177,17 +177,17 @@ class DatabaseHelper {
   }
 
   // static Database? _database;
-
+  
   Future<int> obtenerBalance(int usuarioId) async{
     final Database db = await instance.database;
 
     final resultIngresos = await db.rawQuery(
-      'SELECT SUM(monto) as total FROM movimiento WHERE usuario_id = ? and tipo = "ingreso"',
-      [usuarioId]
+      'SELECT SUM(monto) as total FROM movimiento WHERE usuario_id = ? AND tipo = ?', 
+      [usuarioId, 'ingreso']
     );
     final resultEgresos = await db.rawQuery(
-      'SELECT SUM(monto) as total FROM movimiento WHERE usuario_id = ? and tipo = "egreso"',
-      [usuarioId]
+      'SELECT SUM(monto) as total FROM movimiento WHERE usuario_id = ? AND tipo = ?', 
+      [usuarioId, 'egreso']
     );
 
     int ingresos = (resultIngresos.first['total'] as int?) ?? 0;
@@ -195,4 +195,5 @@ class DatabaseHelper {
 
     return ingresos - egresos;
   }
+  
 }

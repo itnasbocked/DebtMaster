@@ -49,15 +49,34 @@ class _HistorialScreenState extends State<HistorialScreen> {
   }
 
 
-  void _borrarMovimiento(int index, int idBaseDatos) async {
-    // Borrado del backend
-    await _logic.borrarMovimiento(idBaseDatos);
-    
-    // Eliminación de la UI
-    setState(() {
-      listaMutable.removeAt(index);
-    });
-    _recargarDatos();
+ void _borrarMovimiento(int index, int idBaseDatos) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("¿Eliminar movimiento?"),
+        content: const Text("Estás a punto de borrar este registro financiero. Esta acción alterará tu balance actual y no se puede deshacer."),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context), 
+            child: const Text("Cancelar", style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () async {
+              await _logic.borrarMovimiento(idBaseDatos);
+              
+              if (context.mounted) Navigator.pop(context);
+              
+              setState(() {
+                listaMutable.removeAt(index);
+              });
+              _recargarDatos();
+            },
+            child: const Text("Eliminar", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -85,6 +104,7 @@ class _HistorialScreenState extends State<HistorialScreen> {
                 String fechaLimpia = "$dia/$mes/$anio";
 
                 return ListTile(
+                  onTap: () {}, 
                   title: Text(
                     m.descripcion ?? "Sin descripción", 
                     style: const TextStyle(fontWeight: FontWeight.bold)
@@ -112,6 +132,7 @@ class _HistorialScreenState extends State<HistorialScreen> {
                       IconButton(
                         icon: const Icon(Icons.delete_outline, color: Colors.red),
                         onPressed: () {
+                          // Buscamos el índice original en la lista general para no borrar el equivocado
                           int originalIndex = listaMutable.indexOf(m);
                           _borrarMovimiento(originalIndex, m.id!);
                         },
@@ -119,16 +140,14 @@ class _HistorialScreenState extends State<HistorialScreen> {
                         constraints: const BoxConstraints(),
                       ),
                     ],
-                  ),);
+                  ),
+                );
               },
             ),
-
-            
     );
   }
   
   void _mostrarDialogoEdicion(Movimiento m, int index) {
-    // Precargamos los controladores con los datos actuales del disco
     TextEditingController mC = TextEditingController(text: (m.monto / 100).toStringAsFixed(2));
     TextEditingController dC = TextEditingController(text: m.descripcion);
 
@@ -166,6 +185,7 @@ class _HistorialScreenState extends State<HistorialScreen> {
                   m.monto = (nuevoValor * 100).round();
                   m.descripcion = dC.text;
                   listaMutable[index] = m;
+                  _recargarDatos();
                 });
                 Navigator.pop(context);
               }
@@ -205,23 +225,30 @@ class _IngresosEgresosScreenState extends State<IngresosEgresosScreen> {
     });
   }
 
+  Future<void> _mostrarHistorial() async {
+    await Navigator.push(
+      context, 
+      MaterialPageRoute(builder: (_) => HistorialScreen(movimientos))
+    );
+    _recargarDatos(); 
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: backgroundColor,
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 30),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Text(
-                "Ingresos y Egresos",
-                style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 32),
+              // Text(
+              //   "Ingresos y Egresos",
+              //   style: TextStyle(
+              //       fontSize: 28,
+              //       fontWeight: FontWeight.bold),
+              // ),
+              // const SizedBox(height: 32),
 
               _buildBalanceCard(),
 
@@ -290,33 +317,76 @@ class _IngresosEgresosScreenState extends State<IngresosEgresosScreen> {
 
   Widget _buildHealthSection() {
     double ratio = _calcularSuma("ingreso") == 0 ? 0 : (_calcularSuma("egreso") / _calcularSuma("ingreso"));
-    Color color = secondaryGreen;
+    
+    // Máquina de estados para color y mensaje
+    Color color;
+    String estadoSalud;
+    String descripcionSalud;
+
     if (ratio > 0.8) {
       color = criticalRed;
+      estadoSalud = "Crítico";
+      descripcionSalud = "Tus gastos están al límite.";
     } else if (ratio > 0.5) {
       color = Colors.yellow.shade700;
+      estadoSalud = "Precaución";
+      descripcionSalud = "Modera tus egresos.";
+    } else {
+      color = secondaryGreen;
+      estadoSalud = "Excelente";
+      descripcionSalud = "Finanzas bajo control.";
     }
+
     return Container(
       padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(color: const Color(0xFFE6E8EB), borderRadius: BorderRadius.circular(30)),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE6E8EB), 
+        borderRadius: BorderRadius.circular(30)
+      ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
           SizedBox(
-            width: 70, height: 70,
-            child: CircularProgressIndicator(
-              value: ratio.clamp(0.0, 1.0),
-              strokeWidth: 10,
-              backgroundColor: Color(0xCC111827),
-              valueColor: AlwaysStoppedAnimation(color),
+            width: 85,
+            height: 85,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                CircularProgressIndicator(
+                  value: ratio.clamp(0.0, 1.0),
+                  strokeWidth: 10,
+                  backgroundColor: const Color(0xCC111827),
+                  valueColor: AlwaysStoppedAnimation(color),
+                ),
+                Center(
+                  child: Text(
+                    "${(ratio * 100).toStringAsFixed(0)}%",
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold, 
+                      fontSize: 16
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text("Salud sobre ingresos", style: TextStyle(fontWeight: FontWeight.bold)),
-              Text("${(ratio * 100).toStringAsFixed(1)}% utilizado", style: TextStyle(color: Colors.grey.shade600)),
-            ],
+          
+          const SizedBox(width: 24), // Separación entre gráfica y texto
+          
+          Expanded( // Expanded evita que el texto rompa la pantalla si es muy largo
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Salud: $estadoSalud", 
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  descripcionSalud, 
+                  style: TextStyle(color: Colors.grey.shade700, fontSize: 14)
+                ),
+              ],
+            ),
           )
         ],
       ),
@@ -344,7 +414,7 @@ class _IngresosEgresosScreenState extends State<IngresosEgresosScreen> {
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        decoration: BoxDecoration(color: color, shape: BoxShape.rectangle, borderRadius: BorderRadius.circular(21)),
         child: Icon(icon, color: Colors.white, size: 30),
       ),
     );
@@ -400,5 +470,4 @@ class _IngresosEgresosScreenState extends State<IngresosEgresosScreen> {
     );
   }
 
-  void _mostrarHistorial() => Navigator.push(context, MaterialPageRoute(builder: (_) => HistorialScreen(movimientos)));
 }
