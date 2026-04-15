@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:dm/ui/auth_page.dart';
 import 'package:dm/ui/main_screen.dart';
+import 'logic/notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -16,6 +17,10 @@ void main() async {
       sqfliteFfiInit();
       databaseFactory = databaseFactoryFfi;
     }
+
+  final notiService = NotificationService();
+  await notiService.init();
+  await notiService.requestPermission();
 
   final prefs = await SharedPreferences.getInstance();
   final bool sesionActiva = prefs.getBool('isLoggedIn') ?? false;

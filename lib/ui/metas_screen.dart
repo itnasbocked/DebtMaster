@@ -24,7 +24,6 @@ class _MetasScreenState extends State<MetasScreen> {
     _cargarMetas();
   }
 
-  // --- 1. LÓGICA DE BASE DE DATOS (CRUD) ---
   Future<void> _cargarMetas() async {
     final db = await DatabaseHelper.instance.database;
     final result = await db.query('meta', where: 'usuario_id = ?', whereArgs: [idUsuarioActual]);
@@ -78,11 +77,10 @@ class _MetasScreenState extends State<MetasScreen> {
     return result.map((map) => AporteMeta.fromMap(map)).toList();
   }
 
-  // --- 2. INTERFAZ GRÁFICA ---
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.transparent, // Deja que el color del MainScreen brille
+      backgroundColor: Colors.transparent,
       body: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 24),
         child: Column(
@@ -176,7 +174,6 @@ class _MetasScreenState extends State<MetasScreen> {
     );
   }
 
-  // --- 3. DIÁLOGOS Y PANTALLAS MODALES ---
   void _mostrarDetallesMeta(Meta meta, List<AporteMeta> historial) {
     TextEditingController aC = TextEditingController();
     double progreso = meta.montoObjetivo == 0 ? 0 : meta.montoActual / meta.montoObjetivo;
@@ -203,7 +200,9 @@ class _MetasScreenState extends State<MetasScreen> {
     }
 
     if (maxAbono > 0) {
-      for(int i = 0; i < 6; i++) alturas[i] = montosPorMes[i] / maxAbono;
+      for(int i = 0; i < 6; i++) {
+        alturas[i] = montosPorMes[i] / maxAbono;
+      }
     }
 
     showModalBottomSheet(
@@ -224,7 +223,6 @@ class _MetasScreenState extends State<MetasScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // --- TÍTULO CON BOTONES DE EDITAR Y BORRAR A LA DERECHA ---
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -390,7 +388,7 @@ class _MetasScreenState extends State<MetasScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   DropdownButtonFormField<String>(
-                    value: opcionesIconos.contains(iconoSeleccionado) ? iconoSeleccionado : "💰",
+                    initialValue: opcionesIconos.contains(iconoSeleccionado) ? iconoSeleccionado : "💰",
                     decoration: const InputDecoration(labelText: "Icono de la meta"),
                     items: opcionesIconos.map((String emoji) {
                       return DropdownMenuItem(
@@ -495,7 +493,7 @@ class _MetasScreenState extends State<MetasScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   DropdownButtonFormField<String>(
-                    value: iconoSeleccionado,
+                    initialValue: iconoSeleccionado,
                     decoration: const InputDecoration(labelText: "Icono de la meta"),
                     items: opcionesIconos.map((String emoji) {
                       return DropdownMenuItem(
@@ -576,9 +574,8 @@ class _MetasScreenState extends State<MetasScreen> {
       },
     );
   }
-} // <--- AQUÍ CIERRA LA CLASE DEL STATE CORRECTAMENTE
+}
 
-// --- 4. WIDGETS EXTERNOS REUTILIZABLES ---
 class AporteItem extends StatelessWidget {
   final String mes;
   final String monto;

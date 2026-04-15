@@ -1,3 +1,4 @@
+import 'package:dm/logic/notification_service.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../data/database/database_helper.dart';
@@ -115,30 +116,39 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   @override
-  Widget build(BuildContext context){
-    return Scaffold(
-      backgroundColor: const Color(0xFFF2F4F7),
-      // Barra superior
-      appBar: AppBar(
-        title: Text(
-          _titulos[_selectedIndex],
-          style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 28, color: Colors.black)
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      // HitTestBehavior.opaque es vital: permite capturar toques incluso 
+      // en los espacios vacíos del fondo donde no hay widgets.
+      behavior: HitTestBehavior.opaque,
+      onDoubleTap: () {
+        debugPrint("--- GESTO DE DEPURACIÓN: DOBLE TOQUE DETECTADO ---");
+        NotificationService().Bypass();
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFFF2F4F7),
+        // Barra superior
+        appBar: AppBar(
+          title: Text(
+            _titulos[_selectedIndex],
+            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 28, color: Colors.black)
+          ),
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.account_circle, color: Colors.black, size: 32),
+              onPressed: _mostrarPerfilUsuario, 
+            )
+          ],
         ),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.account_circle, color: Colors.black, size: 32),
-            onPressed: _mostrarPerfilUsuario, 
-          )
-        ],
+        // Contenedor principal
+        body: IndexedStack(
+          index: _selectedIndex,
+          children: _pantallas,
+        ),
+        bottomNavigationBar: _buildBottomNav(),
       ),
-      // Contenedor principal
-      body: IndexedStack(
-        index: _selectedIndex,
-        children: _pantallas,
-      ),
-      bottomNavigationBar: _buildBottomNav(),
     );
   }
 

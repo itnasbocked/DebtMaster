@@ -242,13 +242,6 @@ class _IngresosEgresosScreenState extends State<IngresosEgresosScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // Text(
-              //   "Ingresos y Egresos",
-              //   style: TextStyle(
-              //       fontSize: 28,
-              //       fontWeight: FontWeight.bold),
-              // ),
-              // const SizedBox(height: 32),
 
               _buildBalanceCard(),
 
@@ -370,7 +363,7 @@ class _IngresosEgresosScreenState extends State<IngresosEgresosScreen> {
             ),
           ),
           
-          const SizedBox(width: 24), // Separación entre gráfica y texto
+          const SizedBox(width: 24),
           
           Expanded( // Expanded evita que el texto rompa la pantalla si es muy largo
             child: Column(
