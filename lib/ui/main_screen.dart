@@ -30,10 +30,14 @@ class _MainScreenState extends State<MainScreen> {
 
   final List<String> _titulos = [
     "Calendario",
-    "Mis Tarjetas",
+    "Tarjetas",
     "Movimientos",
     "Metas"
   ];
+
+  Future<void> _recargarDatos() async {
+    setState(() {});
+  }
 
   Future<void> _mostrarPerfilUsuario() async {
     final db = await DatabaseHelper.instance.database;
@@ -138,7 +142,10 @@ class _MainScreenState extends State<MainScreen> {
           actions: [
             IconButton(
               icon: const Icon(Icons.account_circle, color: Colors.black, size: 32),
-              onPressed: _mostrarPerfilUsuario, 
+              onPressed: () {
+                _mostrarPerfilUsuario();
+                _recargarDatos();
+              },
             )
           ],
         ),

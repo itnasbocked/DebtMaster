@@ -1,3 +1,4 @@
+import 'package:dm/logic/movimiento_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../data/models/meta_model.dart';
@@ -12,6 +13,8 @@ class MetasScreen extends StatefulWidget {
 }
 
 class _MetasScreenState extends State<MetasScreen> {
+  //Instancia del controlador para añadir los movimientos de abono en el apartado de movimientos
+  final _logic = MovimientoController();
   List<Meta> metas = [];
   final Color primaryBlue = const Color(0xFF2563EB);
   final Color secondaryGreen = const Color(0xFF6BC88E);
@@ -53,6 +56,16 @@ class _MetasScreenState extends State<MetasScreen> {
 
   Future<void> _abonarMeta(Meta meta, int centavosAhorro) async {
     final db = await DatabaseHelper.instance.database;
+    await _logic.registrarMovimiento(
+      isGoal: 1,
+      montoRaw: centavosAhorro.toString(),
+      descripcion: "Aporte a meta '${meta.nombre}'",
+      tipo: "egreso",
+      frecuencia: "ninguna",
+      usuarioId: idUsuarioActual,
+    );
+    debugPrint(centavosAhorro.toString());
+
     await db.insert('aporte_meta', {
       'meta_id': meta.id,
       'monto': centavosAhorro,
@@ -60,7 +73,7 @@ class _MetasScreenState extends State<MetasScreen> {
     });
 
     int nuevoMonto = meta.montoActual + centavosAhorro;
-    if (nuevoMonto > meta.montoObjetivo) nuevoMonto = meta.montoObjetivo;
+    // if (nuevoMonto > meta.montoObjetivo) nuevoMonto = meta.montoObjetivo;
 
     await db.update('meta', {'monto_actual': nuevoMonto}, where: 'id = ?', whereArgs: [meta.id]);
     await _cargarMetas();

@@ -3,6 +3,7 @@ import '../data/models/ingresos-egresos_model.dart';
 
 class MovimientoController{
   Future<String> registrarMovimiento({
+    int isGoal = 0,
     required String montoRaw,
     required String descripcion,
     required String tipo,
@@ -13,7 +14,7 @@ class MovimientoController{
       if (montoRaw.isEmpty) return 'El monto no puede estar vacío';
       final montoDecimal = double.tryParse(montoRaw) ?? 0.0;
       if (montoDecimal <= 0) return 'Monto inválido. Debe ser un número positivo. $montoDecimal';
-      int montoCentavos = (montoDecimal * 100).round();
+      int montoCentavos = (isGoal == 0) ? (montoDecimal * 100).round() : montoDecimal.round();
 
       final nuevoMovimiento = Movimiento(usuario_id: usuarioId, monto: montoCentavos, fecha: DateTime.now(), tipo: tipo,
       descripcion: descripcion.isEmpty ? "Sin descripción" : descripcion, frecuencia: 'ninguna');

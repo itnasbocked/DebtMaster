@@ -1,5 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
+import 'package:flutter/foundation.dart';
 import '../models/ingresos-egresos_model.dart';
 
 class DatabaseHelper {
@@ -44,17 +45,18 @@ class DatabaseHelper {
 
     // 2. Tabla de Tarjetas
     await db.execute('''
-      CREATE TABLE tarjeta (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        usuario_id INTEGER NOT NULL,
-        nombre_tarjeta TEXT,
-        tipo TEXT,
-        corte_dia INTEGER,
-        pago_dia INTEGER,
-        monto_minimo INTEGER,
-        FOREIGN KEY (usuario_id) REFERENCES usuario(id)
-      )
-    ''');
+    CREATE TABLE tarjeta (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      usuario_id INTEGER NOT NULL,
+      nombre_tarjeta TEXT,
+      numero_tarjeta TEXT, -- NUEVA COLUMNA
+      tipo TEXT,
+      corte_dia INTEGER,
+      pago_dia INTEGER,
+      monto_minimo INTEGER,
+      FOREIGN KEY (usuario_id) REFERENCES usuario(id)
+    )
+  ''');
 
     // 3. Tabla de Gastos Fijos
     await db.execute('''
@@ -127,6 +129,72 @@ class DatabaseHelper {
       )
     ''');
   
+  }
+
+  Future<void> inyectarTarjetaPrueba() async {
+    debugPrint("Inicio");
+    final db = await instance.database;
+    
+    final List<Map<String, dynamic>> existentes = await db.query('tarjeta');
+    if (existentes.isEmpty) {
+      await db.insert('tarjeta', {
+        'usuario_id': 1,
+        'nombre_tarjeta': 'BBVA',
+        'numero_tarjeta': '4152 3134 1234 5678',
+        'tipo': 'Credito',
+        'corte_dia': 20,
+        'pago_dia': 5,
+        'monto_minimo': 250000
+      });
+      debugPrint("--- HARDWARE: Tarjeta de prueba inyectada con tu esquema ---");
+      calcularPresupuestoDiarioSeguro();
+    }
+  }
+
+  Future<int> insertarTarjeta(Map<String, dynamic> tarjetaData) async {
+    final db = await database;
+    return await db.insert('tarjeta', tarjetaData);
+  }
+
+  Future<double> calcularPresupuestoDiarioSeguro() async {
+    debugPrint("Calculo de Preuspuesto");
+    final db = await instance.database;
+    debugPrint("Salida de la instancia");
+
+    final List<Map<String, dynamic>> ingresosData = await db.rawQuery("SELECT SUM(monto) as total FROM movimiento WHERE tipo = 'ingreso'");
+    final List<Map<String, dynamic>> gastosData = await db.rawQuery("SELECT SUM(monto) as total FROM movimiento WHERE tipo = 'gasto'");
+    
+    double ingresos = (ingresosData.first['total'] as num?)?.toDouble() ?? 0.0;
+    double gastos = (gastosData.first['total'] as num?)?.toDouble() ?? 0.0;
+    double liquidez = ingresos - gastos;
+
+    debugPrint("Ingresos");
+    final List<Map<String, dynamic>> deudaData = await db.rawQuery("SELECT SUM(monto_minimo) as total FROM tarjeta");
+    double obligaciones = (deudaData.first['total'] as num?)?.toDouble() ?? 0.0;
+    debugPrint("Salida Ingresos");
+
+
+    DateTime hoy = DateTime.now();
+    DateTime ultimoDiaMes = DateTime(hoy.year, hoy.month + 1, 0); 
+    int diasRestantes = ultimoDiaMes.day - hoy.day;
+
+    if (diasRestantes <= 0) diasRestantes = 1;
+
+    double dineroLibre = (liquidez - obligaciones) / 100;
+    double presupuestoDiario = dineroLibre / diasRestantes;
+    
+    debugPrint(presupuestoDiario.toString());
+    if (presupuestoDiario < 0) return 0.0;
+
+    debugPrint("Liquidez: \$${liquidez.toStringAsFixed(2)} | Deuda: \$${obligaciones.toStringAsFixed(2)} | Días: $diasRestantes");
+    debugPrint("PRESUPUESTO DIARIO: \$${presupuestoDiario.toStringAsFixed(2)}");
+
+    return presupuestoDiario;
+  }
+
+  Future<List<Map<String, dynamic>>> obtenerTarjetas() async {
+    final db = await database;
+    return await db.query('tarjeta');
   }
 
   //Funciones CRUD para usuarios
