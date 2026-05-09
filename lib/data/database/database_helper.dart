@@ -1,3 +1,4 @@
+import 'package:share_plus/share_plus.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:flutter/foundation.dart';
@@ -9,6 +10,27 @@ class DatabaseHelper {
   static Database? _database;
 
   DatabaseHelper._init();
+
+  int? userId;
+
+  Future<void> enviarBD() async {
+    try {
+      // 1. Obtener la ruta real del archivo .db
+      final db = await DatabaseHelper.instance.database;
+      String path = db.path;
+
+      // 2. Crear una referencia al archivo
+      XFile archivoParaEnviar = XFile(path);
+
+      // 3. Abrir la hoja de compartir nativa
+      await Share.shareXFiles(
+        [archivoParaEnviar],
+        text: 'Respaldo de Base de Datos DebtMaster - Auditoría QA',
+      );
+    } catch (e) {
+      debugPrint("Error al intentar compartir la BD: $e");
+    }
+  }
 
   // Obtener la base de datos
   Future<Database> get database async {
@@ -128,26 +150,66 @@ class DatabaseHelper {
         FOREIGN KEY (meta_id) REFERENCES meta(id) ON DELETE CASCADE
       )
     ''');
-  
+
+    // 8. Tabla de Ingresos Fijos
+    await db.execute('''
+      CREATE TABLE ingreso_fijo (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        usuario_id INTEGER NOT NULL,
+        nombre_ingreso TEXT,
+        monto INTEGER,
+        frecuencia TEXT,
+        fecha_cobro TEXT,
+        FOREIGN KEY (usuario_id) REFERENCES usuario(id)
+      )
+    ''');
+
   }
 
-  Future<void> inyectarTarjetaPrueba() async {
-    debugPrint("Inicio");
-    final db = await instance.database;
+//Método obsoleto, se mantiene para pruebas pero no se llama desde la app | Posiblemente se elimine en futuras versiones
+// Future<void> inyectarTarjetaPrueba() async {
+//   debugPrint("Inicio");
+//   final db = await instance.database;
+  
+//   final List<Map<String, dynamic>> existentes = await db.query('tarjeta');
+//   if (existentes.isEmpty) {
+//     await db.insert('tarjeta', {
+//       'usuario_id': 1,
+//       'nombre_tarjeta': 'BBVA',
+//       'numero_tarjeta': 'XXXX XXXX XXXX 5678',
+//       'tipo': 'Credito',
+//       'corte_dia': 20,
+//       'pago_dia': 5,
+//       'monto_minimo': 250000
+//     });
+//     debugPrint("--- HARDWARE: Tarjeta de prueba inyectada con tu esquema ---");
+//     calcularPresupuestoDiarioSeguro();
+//   }
+// }
+  
+  Future<String> registrarUsuario(String nombre, String correo, String contrasena, int ingresoCentavos) async {
+    final db = await database;
+
+    final resultado = await db.query(
+      'usuario', 
+      where: 'correo = ?', 
+      whereArgs: [correo]
+    );
     
-    final List<Map<String, dynamic>> existentes = await db.query('tarjeta');
-    if (existentes.isEmpty) {
-      await db.insert('tarjeta', {
-        'usuario_id': 1,
-        'nombre_tarjeta': 'BBVA',
-        'numero_tarjeta': '4152 3134 1234 5678',
-        'tipo': 'Credito',
-        'corte_dia': 20,
-        'pago_dia': 5,
-        'monto_minimo': 250000
+    if (resultado.isNotEmpty) {
+      return "Error: El correo ya está registrado";
+    }
+
+    try {
+      await db.insert('usuario', {
+        'nombre': nombre,
+        'correo': correo,
+        'contrasena': contrasena,
+        'ingreso_mensual': ingresoCentavos,
       });
-      debugPrint("--- HARDWARE: Tarjeta de prueba inyectada con tu esquema ---");
-      calcularPresupuestoDiarioSeguro();
+      return "Exito";
+    } catch (e) {
+      return "Error de base de datos: $e";
     }
   }
 
@@ -161,15 +223,15 @@ class DatabaseHelper {
     final db = await instance.database;
     debugPrint("Salida de la instancia");
 
-    final List<Map<String, dynamic>> ingresosData = await db.rawQuery("SELECT SUM(monto) as total FROM movimiento WHERE tipo = 'ingreso'");
-    final List<Map<String, dynamic>> gastosData = await db.rawQuery("SELECT SUM(monto) as total FROM movimiento WHERE tipo = 'gasto'");
+    final List<Map<String, dynamic>> ingresosData = await db.rawQuery("SELECT SUM(monto) as total FROM movimiento WHERE tipo = 'ingreso' AND usuario_id = ?", [userId]);
+    final List<Map<String, dynamic>> gastosData = await db.rawQuery("SELECT SUM(monto) as total FROM movimiento WHERE tipo = 'gasto' AND usuario_id = ?", [userId]);
     
     double ingresos = (ingresosData.first['total'] as num?)?.toDouble() ?? 0.0;
     double gastos = (gastosData.first['total'] as num?)?.toDouble() ?? 0.0;
     double liquidez = ingresos - gastos;
 
     debugPrint("Ingresos");
-    final List<Map<String, dynamic>> deudaData = await db.rawQuery("SELECT SUM(monto_minimo) as total FROM tarjeta");
+    final List<Map<String, dynamic>> deudaData = await db.rawQuery("SELECT SUM(monto_minimo) as total FROM tarjeta WHERE usuario_id = ?", [userId]);
     double obligaciones = (deudaData.first['total'] as num?)?.toDouble() ?? 0.0;
     debugPrint("Salida Ingresos");
 
@@ -194,8 +256,45 @@ class DatabaseHelper {
 
   Future<List<Map<String, dynamic>>> obtenerTarjetas() async {
     final db = await database;
-    return await db.query('tarjeta');
+    return await db.query('tarjeta', where: 'usuario_id = ?', whereArgs: [userId]);
   }
+
+  // --- MÉTODOS PARA EL CALENDARIO ---
+
+  // Obtener movimientos de una fecha específica
+  Future<List<Map<String, dynamic>>> obtenerMovimientosPorFecha(String fecha) async {
+    final db = await database;
+    return await db.query(
+      'movimiento',
+      where: 'fecha = ? AND usuario_id = ?',
+      whereArgs: [fecha, userId],
+    );
+  }
+
+  // Inserción en tabla general de movimientos
+  Future<int> insertarMovimiento(Map<String, dynamic> movimiento) async {
+    final db = await database;
+    return await db.insert('movimiento', movimiento);
+  }
+
+  // Inserción en Gasto Fijo
+  Future<int> insertarGastoFijo(Map<String, dynamic> gastoFijo) async {
+    final db = await database;
+    return await db.insert('gasto_fijo', gastoFijo);
+  }
+
+  // Inserción en Ingreso Fijo
+  Future<int> insertarIngresoFijo(Map<String, dynamic> ingresoFijo) async {
+    final db = await database;
+    return await db.insert('ingreso_fijo', ingresoFijo);
+  }
+
+  // Inserción de Alertas
+  Future<int> insertarAlerta(Map<String, dynamic> alerta) async {
+    final db = await database;
+    return await db.insert('alerta', alerta);
+  }
+
 
   //Funciones CRUD para usuarios
 

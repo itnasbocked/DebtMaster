@@ -9,6 +9,12 @@ import 'metas_screen.dart';
 import 'calendario_screen.dart';
 import 'tarjetas_screen.dart';
 
+final GlobalKey<MetasScreenState> _metasKey = GlobalKey();
+final GlobalKey<TarjetasScreenState> _tarjetasKey = GlobalKey();
+final GlobalKey<IngresosEgresosScreenState> _inicioKey = GlobalKey();
+final GlobalKey<CalendarioScreenState> _calendarioKey = GlobalKey();
+
+
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
 
@@ -18,15 +24,10 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
-  final int idUsuarioActual = 1;
+  final int? idUsuarioActual = DatabaseHelper.instance.userId;
   final primaryBlue = const Color(0xFF6200EE);
 
-  final List<Widget> _pantallas = const [
-    CalendarioScreen(),
-    TarjetasScreen(),
-    IngresosEgresosScreen(),
-    MetasScreen()
-  ];
+  late List<Widget> _pantallas;
 
   final List<String> _titulos = [
     "Calendario",
@@ -35,7 +36,39 @@ class _MainScreenState extends State<MainScreen> {
     "Metas"
   ];
 
-  Future<void> _recargarDatos() async {
+  @override
+  void initState() {
+    super.initState();
+    _pantallas = [
+      CalendarioScreen(key: _calendarioKey),
+      TarjetasScreen(key: _tarjetasKey),
+      IngresosEgresosScreen(key: _inicioKey),
+      MetasScreen(key: _metasKey),
+    ];
+  }
+
+  void _onItemTapped(int index) {
+    setState(() {
+      _selectedIndex = index;
+    });
+
+    switch (index) {
+      case 0:
+        _calendarioKey.currentState?.cargarEventos();
+        break;
+      case 1:
+        _tarjetasKey.currentState?.cargarDatos();
+        break;
+      case 2:
+        _inicioKey.currentState?.recargarDatos();
+        break;
+      case 3:
+        _metasKey.currentState?.cargarMetas();
+        break;
+    }
+  }
+
+  Future<void> recargarDatos() async {
     setState(() {});
   }
 
@@ -87,6 +120,11 @@ class _MainScreenState extends State<MainScreen> {
             ],
           ),
           actions: [
+            // //Prueba, eliminar | Se deja para extracción de BD en caso de necesitarse
+            // IconButton(
+            //   icon: const Icon(Icons.share),
+            //   onPressed: () => DatabaseHelper.instance.enviarBD(),
+            // ),
             TextButton(
               onPressed: () => Navigator.pop(context),
               child: const Text("Cerrar", style: TextStyle(color: Colors.grey)),
@@ -101,6 +139,7 @@ class _MainScreenState extends State<MainScreen> {
               icon: const Icon(Icons.logout),
               label: const Text("Cerrar Sesión", style: TextStyle(fontWeight: FontWeight.bold)),
               onPressed: () async {
+                DatabaseHelper.instance.userId = null;
                 final prefs = await SharedPreferences.getInstance();
                 await prefs.clear(); 
 
@@ -144,7 +183,7 @@ class _MainScreenState extends State<MainScreen> {
               icon: const Icon(Icons.account_circle, color: Colors.black, size: 32),
               onPressed: () {
                 _mostrarPerfilUsuario();
-                _recargarDatos();
+                recargarDatos();
               },
             )
           ],

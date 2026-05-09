@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'package:dm/data/database/database_helper.dart';
+// import 'package:dm/ui/tarjetas_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -37,7 +39,25 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'DebtMaster',
-      home: sesionActiva ? const MainScreen() : const AuthPage(),
+      home: FutureBuilder<int?>(
+      future: _obtenerSesionRecurrente(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        }
+        if (snapshot.hasData && snapshot.data != null) {
+          return const MainScreen();
+        } else {
+          return const AuthPage();
+          }
+      },),
     );
+  }
+
+  Future<int?> _obtenerSesionRecurrente() async {
+    final prefs = await SharedPreferences.getInstance();
+    int? id = prefs.getInt('userId');
+    DatabaseHelper.instance.userId = id;
+    return id;
   }
 }

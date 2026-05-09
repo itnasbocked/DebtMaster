@@ -1,70 +1,189 @@
 import 'package:dm/data/database/database_helper.dart';
+import 'package:dm/logic/movimiento_controller.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:fluttertoast/fluttertoast.dart';
 
 class TarjetasScreen extends StatefulWidget {
   const TarjetasScreen({super.key});
 
   @override
-  State<TarjetasScreen> createState() => _TarjetasScreenState();
+  State<TarjetasScreen> createState() => TarjetasScreenState();
 }
 
-class _TarjetasScreenState extends State<TarjetasScreen> {
+class TarjetasScreenState extends State<TarjetasScreen> {
   double _presupuesto = 0.0;
   List<Map<String, dynamic>> _misTarjetas = [];
   String _nombreUsuario = "Cargando...";
   bool _cargando = true;
-  
-  int _diasParaCorte = 0;
   double _porcentajeSalud = 0.0; 
 
   @override
   void initState() {
     super.initState();
-    _cargarDatos();
+    cargarDatos();
+  }
+
+  Future<void> pagarTarjeta(Map<String, dynamic> tarjeta, double montoAPagar) async {
+    final db = await DatabaseHelper.instance.database;
+    int? userId = DatabaseHelper.instance.userId;
+
+    int balanceActualCentavos = await DatabaseHelper.instance.obtenerBalance(userId!);
+    double balanceActualPesos = balanceActualCentavos / 100;
+    
+    if (montoAPagar > balanceActualPesos) {
+      Fluttertoast.showToast(
+        msg: "Fondos insuficientes. Tienes \$${balanceActualPesos.toStringAsFixed(2)}",
+        backgroundColor: Colors.red,
+        textColor: Colors.white
+      );
+      return;
+    }
+
+    final logic = MovimientoController();
+    await logic.registrarMovimiento(
+      montoRaw: (montoAPagar * 100).toInt().toString(),
+      descripcion: "Pago de tarjeta: ${tarjeta['nombre_tarjeta']}",
+      tipo: "egreso",
+      frecuencia: "ninguna",
+      usuarioId: userId,
+    );
+
+    await db.update(
+      'tarjeta',
+      {'pagada': 1, 'ultimo_mes_pagado': DateTime.now().month},
+      where: 'id = ?',
+      whereArgs: [tarjeta['id']],
+    );
+
+    Fluttertoast.showToast(
+      msg: "Tarjeta pagada con éxito",
+      backgroundColor: Colors.green,
+      textColor: Colors.white
+    );
+    cargarDatos();
+  }
+
+  void _mostrarDialogoPago(Map<String, dynamic> tarjeta) {
+    double montoSugerido = (tarjeta['monto_minimo'] as num).toDouble() / 100;
+    TextEditingController pagoCtrl = TextEditingController(text: montoSugerido.toStringAsFixed(2));
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text("Pagar ${tarjeta['nombre_tarjeta']}"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text("Puedes modificar el monto para pagar el mínimo o el total para no generar intereses.", style: TextStyle(fontSize: 12, color: Colors.grey)),
+            const SizedBox(height: 15),
+            TextField(
+              controller: pagoCtrl,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: "Monto a pagar",
+                prefixText: "\$ ",
+                border: OutlineInputBorder()
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context), 
+            child: const Text("Cancelar", style: TextStyle(color: Colors.grey))
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF004481)),
+            onPressed: () {
+              double montoReal = double.tryParse(pagoCtrl.text) ?? 0.0;
+              if (montoReal > 0) {
+                Navigator.pop(context);
+                pagarTarjeta(tarjeta, montoReal);
+              } else {
+                Fluttertoast.showToast(msg: "Ingresa un monto válido");
+              }
+            },
+            child: const Text("Confirmar Pago", style: TextStyle(color: Colors.white)),
+          )
+        ],
+      ),
+    );
   }
 
   int _calcularDiasRestantes(int diaObjetivo) {
     DateTime hoy = DateTime.now();
     DateTime fechaObjetivo = DateTime(hoy.year, hoy.month, diaObjetivo);
     
-    if (fechaObjetivo.isBefore(hoy)) {
+    if (hoy.day > diaObjetivo) {
       fechaObjetivo = DateTime(hoy.year, hoy.month + 1, diaObjetivo);
     }
-    return fechaObjetivo.difference(hoy).inDays;
+    
+    DateTime soloHoy = DateTime(hoy.year, hoy.month, hoy.day);
+    return fechaObjetivo.difference(soloHoy).inDays;
   }
 
-  Future<void> _cargarDatos() async {
+  Future<void> eliminarTarjeta(int id) async {
+    final db = await DatabaseHelper.instance.database;
+    await db.delete('tarjeta', where: 'id = ?', whereArgs: [id]);
+    Fluttertoast.showToast(msg: "Tarjeta eliminada");
+    cargarDatos();
+  }
+
+  void _confirmarEliminacion(int id, String nombre) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("¿Eliminar tarjeta?"),
+        content: Text("Estás a punto de borrar la tarjeta $nombre. Esta acción no se puede deshacer."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar")),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () {
+              Navigator.pop(context);
+              eliminarTarjeta(id);
+            },
+            child: const Text("Eliminar", style: TextStyle(color: Colors.white)),
+          )
+        ],
+      ),
+    );
+  }
+
+  Future<void> cargarDatos() async {
     setState(() => _cargando = true);
-    debugPrint("--- DB TRACE: Iniciando carga de datos... ---");
-    
+    debugPrint("Carga de datos de tarjetas");
+
     try {
       DatabaseHelper db = DatabaseHelper.instance;
       final baseDatos = await db.database;
 
       double pres = await db.calcularPresupuestoDiarioSeguro();
-      
-      List<Map<String, dynamic>> tarjList = await baseDatos.query('tarjeta');
+      List<Map<String, dynamic>> tarjList = await baseDatos.query('tarjeta', where: 'usuario_id = ?', whereArgs: [db.userId]);
 
-      List<Map<String, dynamic>> usuarioList = await baseDatos.query('usuario', where: 'id = 1');
-      String nombreDinamico = usuarioList.isNotEmpty ? usuarioList.first['nombre'] as String : "Usuario";
-      List<Map<String, dynamic>> userList = await baseDatos.query('usuario', limit: 1);
+      String nombreDinamico = "Usuario";
+      List<Map<String, dynamic>> userList = await baseDatos.query('usuario', where: 'id = ?', whereArgs: [db.userId], limit: 1);
+      
+      for (var t in tarjList) {
+        if (t['pagada'] == 1 && t['ultimo_mes_pagado'] != DateTime.now().month) {
+          await baseDatos.update(
+            'tarjeta', 
+            {'pagada': 0}, 
+            where: 'id = ?', 
+            whereArgs: [t['id']]
+          );
+        }
+      }
+      
+      tarjList = await baseDatos.query('tarjeta', where: 'usuario_id = ?', whereArgs: [db.userId]);
+
       if (userList.isNotEmpty) {
         nombreDinamico = userList.first['nombre'] ?? "Usuario";
       }
 
-      int diasFaltantes = 0;
-      if (tarjList.isNotEmpty) {
-        int diaCorte = tarjList.first['corte_dia'] as int;
-        DateTime hoy = DateTime.now();
-        DateTime fechaCorte = DateTime(hoy.year, hoy.month, diaCorte);
-        
-        if (fechaCorte.isBefore(hoy)) {
-          fechaCorte = DateTime(hoy.year, hoy.month + 1, diaCorte);
-        }
-        diasFaltantes = fechaCorte.difference(hoy).inDays;
-      }
-
-      final ingresosData = await baseDatos.rawQuery("SELECT SUM(monto) as total FROM movimiento WHERE tipo = 'ingreso'");
+      final ingresosData = await baseDatos.rawQuery("SELECT SUM(monto) as total FROM movimiento WHERE tipo = 'ingreso' AND usuario_id = ?", [db.userId]);
       double ingresosCentavos = (ingresosData.first['total'] as num?)?.toDouble() ?? 0.0;
       double ingresosPesos = ingresosCentavos / 100;
 
@@ -72,7 +191,9 @@ class _TarjetasScreenState extends State<TarjetasScreen> {
       if (ingresosPesos > 0) {
          double obligacionesTotales = 0.0;
          for(var t in tarjList) {
-           obligacionesTotales += (t['monto_minimo'] as num).toDouble() / 100;
+           if (t['pagada'] == 0 || t['pagada'] == null) {
+             obligacionesTotales += (t['monto_minimo'] as num).toDouble() / 100;
+           }
          }
          
          double libre = ingresosPesos - obligacionesTotales;
@@ -84,7 +205,6 @@ class _TarjetasScreenState extends State<TarjetasScreen> {
       setState(() {
         _presupuesto = pres;
         _misTarjetas = tarjList;
-        _diasParaCorte = diasFaltantes;
         _porcentajeSalud = porcentaje;
         _nombreUsuario = nombreDinamico;
       });
@@ -127,9 +247,30 @@ class _TarjetasScreenState extends State<TarjetasScreen> {
                 const SizedBox(height: 15),
                 Row(
                   children: [
-                    Expanded(child: TextField(controller: corteCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Día de Corte", border: OutlineInputBorder()))),
+                    Expanded(child: TextField(controller: corteCtrl, maxLength: 2,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      TextInputFormatter.withFunction((oldValue, newValue) {
+                        if (newValue.text.isEmpty) return newValue;
+                        int? valor = int.tryParse(newValue.text);
+                        if (valor == null || valor > 31) return oldValue; 
+                        return newValue;
+                      }),
+                    ],
+                    keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Día de Corte", border: OutlineInputBorder()))),
+                    
                     const SizedBox(width: 15),
-                    Expanded(child: TextField(controller: pagoCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Día de Pago", border: OutlineInputBorder()))),
+                    Expanded(child: TextField(controller: pagoCtrl, maxLength: 2, 
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      TextInputFormatter.withFunction((oldValue, newValue) {
+                        if (newValue.text.isEmpty) return newValue;
+                        int? valor = int.tryParse(newValue.text);
+                        if (valor == null || valor > 31) return oldValue; 
+                        return newValue;
+                      }),
+                    ],
+                    keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Día de Pago", border: OutlineInputBorder()))),
                   ],
                 ),
                 const SizedBox(height: 15),
@@ -144,19 +285,24 @@ class _TarjetasScreenState extends State<TarjetasScreen> {
                       double montoPesos = double.tryParse(montoCtrl.text) ?? 0.0;
                       int montoCentavos = (montoPesos * 100).toInt(); 
                       
+                      int? idUsuario = DatabaseHelper.instance.userId;
+                      if (idUsuario == null) return;
+
                       Map<String, dynamic> nuevaTarjeta = {
-                        'usuario_id': 1, 
+                        'usuario_id': idUsuario,
                         'nombre_tarjeta': nombreCtrl.text.isEmpty ? 'Desconocido' : nombreCtrl.text,
                         'numero_tarjeta': 'XXXX XXXX XXXX ${numeroCtrl.text}',
                         'tipo': 'Credito',
                         'corte_dia': int.tryParse(corteCtrl.text) ?? 1,
                         'pago_dia': int.tryParse(pagoCtrl.text) ?? 1,
-                        'monto_minimo': montoCentavos
+                        'monto_minimo': montoCentavos,
+                        'pagada': 0,
+                        'ultimo_mes_pagado': 0
                       };
 
                       await DatabaseHelper.instance.insertarTarjeta(nuevaTarjeta);
                       if (context.mounted) Navigator.pop(context);
-                      await _cargarDatos(); 
+                      await cargarDatos(); 
                     },
                     child: const Text("Guardar Tarjeta", style: TextStyle(color: Colors.white, fontSize: 16)),
                   ),
@@ -227,53 +373,105 @@ class _TarjetasScreenState extends State<TarjetasScreen> {
 
                   if (_misTarjetas.isNotEmpty) ...[
                     SizedBox(
-                      height: 190,
+                      height: 225, 
                       child: PageView.builder(
                         controller: PageController(viewportFraction: 0.88),
                         itemCount: _misTarjetas.length,
                         itemBuilder: (context, index) {
                           final t = _misTarjetas[index];
-                          return Container(
-                            margin: const EdgeInsets.symmetric(horizontal: 8),
-                            padding: const EdgeInsets.all(25),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF004481),
-                              borderRadius: BorderRadius.circular(20),
-                              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 10, offset: const Offset(0, 5))],
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  t['nombre_tarjeta'] ?? "BANCO", 
-                                  style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+                          int diasRestantes = _calcularDiasRestantes(t['corte_dia'] ?? 1);
+                          bool estaPagada = t['pagada'] == 1;
+
+                          return Column(
+                            children: [
+                              Stack(
+                                children: [
+                                  Container(
+                                    height: 185, width: double.infinity,
+                                    margin: const EdgeInsets.symmetric(horizontal: 8),
+                                    padding: const EdgeInsets.all(15),
+                                    decoration: BoxDecoration(
+                                      color: estaPagada ? Colors.grey.shade400 : const Color(0xFF004481),
+                                      borderRadius: BorderRadius.circular(20),
+                                      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 10, offset: const Offset(0, 5))],
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          t['nombre_tarjeta'] ?? "BANCO", 
+                                          style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+                                        ),
+                                        const Spacer(),
+                                        Text(
+                                          t['numero_tarjeta'] ?? "XXXX XXXX XXXX XXXX",
+                                          style: const TextStyle(color: Colors.white, fontSize: 18, letterSpacing: 2),
+                                        ),
+                                        const Spacer(),
+                                        Text(
+                                          _nombreUsuario.toUpperCase(),
+                                          style: const TextStyle(color: Colors.white, fontSize: 14),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  
+                                  Positioned(
+                                    top: 5,
+                                    right: 10,
+                                    child: PopupMenuButton<String>(
+                                      icon: const Icon(Icons.more_vert, color: Colors.white),
+                                      onSelected: (val) {
+                                        if (val == 'pagar') {
+                                          if (estaPagada) {
+                                            Fluttertoast.showToast(msg: "Ya pagaste esta tarjeta este mes");
+                                          } else {
+                                            _mostrarDialogoPago(t);
+                                          }
+                                        }
+                                        if (val == 'borrar') _confirmarEliminacion(t['id'], t['nombre_tarjeta']);
+                                      },
+                                      itemBuilder: (context) => [
+                                        const PopupMenuItem(value: 'pagar', child: Text("Realizar Pago")),
+                                        const PopupMenuItem(value: 'borrar', child: Text("Eliminar", style: TextStyle(color: Colors.red))),
+                                      ],
+                                    ),
+                                  ),
+
+                                  if (estaPagada)
+                                    Positioned.fill(
+                                      child: Container(
+                                        margin: const EdgeInsets.symmetric(horizontal: 8),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withOpacity(0.7),
+                                          borderRadius: BorderRadius.circular(20),
+                                        ),
+                                        child: const Center(
+                                          child: Text("PAGADA", style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.green)),
+                                        ),
+                                      ),
+                                    )
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                estaPagada 
+                                  ? "\"Tarjeta al corriente este mes\"" 
+                                  : "\"fecha de corte en $diasRestantes días\"", 
+                                style: TextStyle(
+                                  color: estaPagada ? Colors.green : const Color(0xFFD9A06F), 
+                                  fontStyle: FontStyle.italic, 
+                                  fontSize: 14
                                 ),
-                                const Spacer(),
-                                Text(
-                                  t['numero_tarjeta'] ?? "XXXX XXXX XXXX XXXX",
-                                  style: const TextStyle(color: Colors.white, fontSize: 18, letterSpacing: 2),
-                                ),
-                                const Spacer(),
-                                Text(
-                                  _nombreUsuario.toUpperCase(),
-                                  style: const TextStyle(color: Colors.white, fontSize: 14),
-                                ),
-                              ],
-                            ),
+                              ),
+                            ],
                           );
                         },
                       ),
                     ),
-                    const SizedBox(height: 15),
+                    const SizedBox(height: 5),
                     const Center(
                       child: Text("👉 Desliza para ver tus otras tarjetas", style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic, fontSize: 12)),
-                    ),
-                    const SizedBox(height: 15),
-                    Center(
-                      child: Text(
-                        "\"fecha de corte en $_diasParaCorte días\"", 
-                        style: const TextStyle(color: Color(0xFFD9A06F), fontStyle: FontStyle.italic, fontSize: 14),
-                      ),
                     ),
                   ] else ...[
                     const Center(

@@ -1,6 +1,7 @@
 import 'package:dm/logic/movimiento_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:fluttertoast/fluttertoast.dart';
 import '../data/models/meta_model.dart';
 import '../data/database/database_helper.dart';
 import '../data/models/aporte_meta_model.dart';
@@ -9,25 +10,37 @@ class MetasScreen extends StatefulWidget {
   const MetasScreen({super.key});
 
   @override
-  State<MetasScreen> createState() => _MetasScreenState();
+  State<MetasScreen> createState() => MetasScreenState();
 }
 
-class _MetasScreenState extends State<MetasScreen> {
+class MetasScreenState extends State<MetasScreen> {
+  //Controlador declarado estúpidamente lejos de la función original para detección de cambio de estados
+  //Pertenece a la función de mostrar detalles de meta
+  TextEditingController aC = TextEditingController();
   //Instancia del controlador para añadir los movimientos de abono en el apartado de movimientos
   final _logic = MovimientoController();
   List<Meta> metas = [];
   final Color primaryBlue = const Color(0xFF2563EB);
   final Color secondaryGreen = const Color(0xFF6BC88E);
 
-  final int idUsuarioActual = 1;
+  int? idUsuarioActual = DatabaseHelper.instance.userId;
 
   @override
   void initState() {
     super.initState();
-    _cargarMetas();
+    cargarMetas();
+    aC.addListener(() {
+      setState(() {});
+    });
   }
 
-  Future<void> _cargarMetas() async {
+  @override
+  void dispose() {
+    aC.dispose();
+    super.dispose();
+  }
+
+  Future<void> cargarMetas() async {
     final db = await DatabaseHelper.instance.database;
     final result = await db.query('meta', where: 'usuario_id = ?', whereArgs: [idUsuarioActual]);
     setState(() {
@@ -38,45 +51,80 @@ class _MetasScreenState extends State<MetasScreen> {
   Future<void> _guardarNuevaMeta(Meta nuevaMeta) async {
     final db = await DatabaseHelper.instance.database;
     await db.insert('meta', nuevaMeta.toMap());
-    await _cargarMetas();
+    await cargarMetas();
   }
 
   Future<void> _actualizarMeta(Meta metaEditada) async {
     final db = await DatabaseHelper.instance.database;
     await db.update('meta', metaEditada.toMap(), where: 'id = ?', whereArgs: [metaEditada.id]);
-    await _cargarMetas();
+    await cargarMetas();
   }
 
   Future<void> _eliminarMeta(int idMeta) async {
     final db = await DatabaseHelper.instance.database;
     await db.delete('aporte_meta', where: 'meta_id = ?', whereArgs: [idMeta]);
     await db.delete('meta', where: 'id = ?', whereArgs: [idMeta]);
-    await _cargarMetas();
+    await cargarMetas();
   }
 
   Future<void> _abonarMeta(Meta meta, int centavosAhorro) async {
+    double balanceDisponible = await _logic.formatearBalance(idUsuarioActual!);
+    double montoAAbonarPesos = centavosAhorro / 100;
+
+    if (montoAAbonarPesos > balanceDisponible) {
+      Fluttertoast.showToast(
+        msg: "Fondos insuficientes. Balance: \$${balanceDisponible.toStringAsFixed(2)}",
+        backgroundColor: Colors.redAccent,
+        textColor: Colors.white,
+      );
+      return;
+    }
+
+    int capacidadRestante = meta.montoObjetivo - meta.montoActual;
+    int aporteEfectivo = centavosAhorro;
+
+    if (aporteEfectivo > capacidadRestante) {
+      aporteEfectivo = capacidadRestante;
+    }
+
+    if (aporteEfectivo <= 0) {
+      Fluttertoast.showToast(
+        msg: "Esta meta ya ha sido completada.",
+        backgroundColor: Colors.amber.shade700,
+        textColor: Colors.white,
+      );
+      return; 
+    }
+
     final db = await DatabaseHelper.instance.database;
+
     await _logic.registrarMovimiento(
       isGoal: 1,
-      montoRaw: centavosAhorro.toString(),
+      montoRaw: aporteEfectivo.toString(),
       descripcion: "Aporte a meta '${meta.nombre}'",
       tipo: "egreso",
       frecuencia: "ninguna",
-      usuarioId: idUsuarioActual,
+      usuarioId: idUsuarioActual!,
     );
-    debugPrint(centavosAhorro.toString());
 
     await db.insert('aporte_meta', {
       'meta_id': meta.id,
-      'monto': centavosAhorro,
+      'monto': aporteEfectivo,
       'fecha': DateTime.now().toIso8601String(),
     });
 
-    int nuevoMonto = meta.montoActual + centavosAhorro;
-    // if (nuevoMonto > meta.montoObjetivo) nuevoMonto = meta.montoObjetivo;
-
+    int nuevoMonto = meta.montoActual + aporteEfectivo;
     await db.update('meta', {'monto_actual': nuevoMonto}, where: 'id = ?', whereArgs: [meta.id]);
-    await _cargarMetas();
+    
+    if (nuevoMonto >= meta.montoObjetivo) {
+      Fluttertoast.showToast(
+        msg: "¡Meta '${meta.nombre}' completada! 🎉",
+        backgroundColor: Colors.green,
+        textColor: Colors.white,
+      );
+    }
+
+    await cargarMetas();
   }
 
   Future<List<AporteMeta>> _obtenerHistorial(int metaId) async {
@@ -120,6 +168,12 @@ class _MetasScreenState extends State<MetasScreen> {
     double progreso = meta.montoObjetivo == 0 ? 0 : meta.montoActual / meta.montoObjetivo;
     int porcentaje = (progreso * 100).toInt();
 
+    bool isMetaCompletada = meta.montoActual >= meta.montoObjetivo;
+    bool isMetaVencida = DateTime.now().isAfter(meta.fechaLimite) && !isMetaCompletada;
+
+    Color colorAlerta = isMetaVencida ? Colors.amber.shade200 : Colors.white;
+    Color colorBorde = isMetaVencida ? Colors.amber.shade600 : Colors.transparent;
+
     return GestureDetector(
       onTap: () async {
         List<AporteMeta> historial = await _obtenerHistorial(meta.id!);
@@ -129,8 +183,9 @@ class _MetasScreenState extends State<MetasScreen> {
         margin: const EdgeInsets.only(bottom: 20),
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: colorAlerta,
           borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: colorBorde, width: 2),
           boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 15, offset: const Offset(0, 5))],
         ),
         child: Column(
@@ -188,7 +243,10 @@ class _MetasScreenState extends State<MetasScreen> {
   }
 
   void _mostrarDetallesMeta(Meta meta, List<AporteMeta> historial) {
-    TextEditingController aC = TextEditingController();
+    
+    aC.addListener(() {
+      if (mounted) setState(() {});
+    });
     double progreso = meta.montoObjetivo == 0 ? 0 : meta.montoActual / meta.montoObjetivo;
     int porcentaje = (progreso * 100).toInt();
 
@@ -217,6 +275,9 @@ class _MetasScreenState extends State<MetasScreen> {
         alturas[i] = montosPorMes[i] / maxAbono;
       }
     }
+
+    bool isMetaCompletada = meta.montoActual >= meta.montoObjetivo;
+    bool isMetaVencida = DateTime.now().isAfter(meta.fechaLimite) && !isMetaCompletada;
 
     showModalBottomSheet(
       context: context,
@@ -323,6 +384,7 @@ class _MetasScreenState extends State<MetasScreen> {
                   Expanded(
                     child: TextField(
                       controller: aC,
+                      maxLength: 7,
                       keyboardType: TextInputType.number,
                       decoration: InputDecoration(
                         hintText: "Cantidad a abonar",
@@ -330,17 +392,51 @@ class _MetasScreenState extends State<MetasScreen> {
                         filled: true,
                         fillColor: Colors.white,
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
+                        
                       ),
                     ),
                   ),
                   const SizedBox(width: 12),
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF22C55E),
+                      backgroundColor: (!isMetaCompletada && aC.text.isNotEmpty) ? const Color(0xFF22C55E) : Colors.grey,
                       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
                     ),
                     onPressed: () async {
+                      if (isMetaCompletada) {
+                        Fluttertoast.showToast(
+                          msg: "¡Ya has alcanzado tu meta '${meta.nombre}'! 🎉",
+                          toastLength: Toast.LENGTH_LONG,
+                          gravity: ToastGravity.BOTTOM,
+                          backgroundColor: Colors.green,
+                          textColor: Colors.white,
+                          fontSize: 16.0,
+                        );
+                        return;
+                      }
+                      else if (isMetaVencida) {
+                        Fluttertoast.showToast(
+                          msg: "La meta está vencida, pero aún puedes abonar :)",
+                          toastLength: Toast.LENGTH_LONG,
+                          gravity: ToastGravity.BOTTOM,
+                          backgroundColor: Colors.amber,
+                          textColor: Colors.white,
+                          fontSize: 16.0,
+                        );
+                        return;
+                      }
+                      if (aC.text.isEmpty) {
+                        Fluttertoast.showToast(
+                          msg: "Por favor ingresa un monto a abonar.",
+                          toastLength: Toast.LENGTH_SHORT,
+                          gravity: ToastGravity.BOTTOM,
+                          backgroundColor: Colors.redAccent,
+                          textColor: Colors.white,
+                          fontSize: 16.0,
+                        );
+                        return;
+                      }
                       double abono = double.tryParse(aC.text) ?? 0;
                       if (abono > 0) {
                         await _abonarMeta(meta, (abono * 100).round());
@@ -463,6 +559,15 @@ class _MetasScreenState extends State<MetasScreen> {
                 ElevatedButton(
                   onPressed: () async {
                     double monto = double.tryParse(mC.text) ?? 0;
+                    if (monto < meta.montoActual){
+                      Fluttertoast.showToast(
+                        msg: "No puedes asignar una meta menor al monto ya ahorrado",
+                        gravity: ToastGravity.TOP,
+                        backgroundColor: Colors.redAccent,
+                        textColor: Colors.white,
+                      );
+                      return;
+                    }
                     if (monto > 0 && nC.text.isNotEmpty) {
                       Meta metaActualizada = Meta(
                         id: meta.id,
@@ -569,7 +674,7 @@ class _MetasScreenState extends State<MetasScreen> {
                     double monto = double.tryParse(mC.text) ?? 0;
                     if (monto > 0 && nC.text.isNotEmpty) {
                       await _guardarNuevaMeta(Meta(
-                        usuarioId: idUsuarioActual,
+                        usuarioId: idUsuarioActual!,
                         nombre: nC.text,
                         montoObjetivo: (monto * 100).round(),
                         fechaLimite: fechaSeleccionada,

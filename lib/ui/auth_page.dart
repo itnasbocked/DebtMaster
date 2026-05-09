@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'main_screen.dart';
-import '../data/database/database_helper.dart'; 
+import '../data/database/database_helper.dart';
+import 'reg_page.dart';
 
 class AuthPage extends StatefulWidget {
   const AuthPage({super.key});
@@ -47,10 +48,10 @@ class _AuthPageState extends State<AuthPage> {
       if (result.isNotEmpty) {
         
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setBool('isLoggedIn', true);
-        
         await prefs.setInt('userId', result.first['id'] as int); 
-        
+        await prefs.setBool('isLoggedIn', true);
+        DatabaseHelper.instance.userId = result.first['id'] as int;
+
         _entrarAlSistema();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -171,9 +172,7 @@ class _AuthPageState extends State<AuthPage> {
                     Center(
                       child: TextButton(
                         onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text("El registro estará disponible próximamente."))
-                          );
+                          Navigator.push(context, MaterialPageRoute(builder: (BuildContext context) => const RegPage()));
                         },
                         child: Text(
                           "¿No tienes cuenta? Regístrate",
