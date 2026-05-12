@@ -1,5 +1,6 @@
 import 'package:dm/data/database/database_helper.dart';
 import 'package:dm/logic/movimiento_controller.dart';
+import 'package:dm/logic/notification_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fluttertoast/fluttertoast.dart';
@@ -23,6 +24,59 @@ class TarjetasScreenState extends State<TarjetasScreen> {
     super.initState();
     cargarDatos();
   }
+  
+  // --- EL CENTINELA: Programa alertas de Corte y Pago (Con Fix Temporal) ---
+  Future<void> _programarAlertasTarjeta(String nombre, int diaCorte, int diaPago) async {
+    DateTime ahora = DateTime.now();
+
+    // Función interna (Helper) para resolver la lógica temporal sin repetir código
+    DateTime calcularFechaAlerta(int diaObjetivo) {
+      DateTime fechaProgramada = DateTime(ahora.year, ahora.month, diaObjetivo, 9, 0);
+
+      if (diaObjetivo == ahora.day) {
+        // Si el objetivo es hoy y ya pasaron las 9 AM, lanzamos en 1 minuto
+        if (ahora.hour >= 9) {
+          return ahora.add(const Duration(minutes: 1));
+        } else {
+          return fechaProgramada;
+        }
+      } else if (fechaProgramada.isBefore(ahora)) {
+        // OJO: Dart maneja automáticamente si month + 1 es enero del próximo año
+        return DateTime(ahora.year, ahora.month + 1, diaObjetivo, 9, 0);
+      }
+      
+      // Si el día objetivo es en el futuro dentro de este mismo mes
+      return fechaProgramada; 
+    }
+
+    // 1. Alerta de Corte
+    DateTime fechaCorte = calcularFechaAlerta(diaCorte);
+    try {
+      await NotificationService().programarNotificacion(
+        DateTime.now().millisecondsSinceEpoch ~/ 1000 + 1, 
+        "Día de Corte: $nombre",
+        "Hoy cierra tu tarjeta. No olvides declarar el saldo en DebtMaster.",
+        fechaCorte
+      );
+    } catch (e) {
+      debugPrint("Error alerta corte: $e");
+    }
+
+    // 2. Alerta de Pago
+    DateTime fechaPago = calcularFechaAlerta(diaPago);
+    try {
+      await NotificationService().programarNotificacion(
+        DateTime.now().millisecondsSinceEpoch ~/ 1000 + 2, 
+        "Día de Pago: $nombre",
+        "¡Último día de pago en $nombre! Evita cargos por intereses.",
+        fechaPago
+      );
+    } catch (e) {
+      debugPrint("Error alerta pago: $e");
+    }
+    
+    debugPrint("Alertas programadas exitosamente para $nombre");
+  }
 
   Future<void> pagarTarjeta(Map<String, dynamic> tarjeta, double montoAPagar) async {
     final db = await DatabaseHelper.instance.database;
@@ -32,36 +86,68 @@ class TarjetasScreenState extends State<TarjetasScreen> {
     double balanceActualPesos = balanceActualCentavos / 100;
     
     if (montoAPagar > balanceActualPesos) {
-      Fluttertoast.showToast(
-        msg: "Fondos insuficientes. Tienes \$${balanceActualPesos.toStringAsFixed(2)}",
-        backgroundColor: Colors.red,
-        textColor: Colors.white
-      );
+      Fluttertoast.showToast(msg: "Fondos insuficientes", backgroundColor: Colors.red);
       return;
     }
 
     final logic = MovimientoController();
     await logic.registrarMovimiento(
-      montoRaw: (montoAPagar * 100).toInt().toString(),
+      montoRaw: montoAPagar.toString(), 
       descripcion: "Pago de tarjeta: ${tarjeta['nombre_tarjeta']}",
       tipo: "egreso",
       frecuencia: "ninguna",
       usuarioId: userId,
     );
 
-    await db.update(
-      'tarjeta',
-      {'pagada': 1, 'ultimo_mes_pagado': DateTime.now().month},
-      where: 'id = ?',
-      whereArgs: [tarjeta['id']],
-    );
-
-    Fluttertoast.showToast(
-      msg: "Tarjeta pagada con éxito",
-      backgroundColor: Colors.green,
-      textColor: Colors.white
-    );
+    await db.update('tarjeta', {'pagada': 1, 'ultimo_mes_pagado': DateTime.now().month}, where: 'id = ?', whereArgs: [tarjeta['id']]);
+    Fluttertoast.showToast(msg: "Tarjeta pagada con éxito", backgroundColor: Colors.green);
     cargarDatos();
+  }
+
+  // --- MÁQUINA DE ESTADOS: FASE 2 (DECLARAR CORTE) ---
+  void _declararCorte(Map<String, dynamic> tarjeta) {
+    TextEditingController deudaCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text("Estado de Cuenta: ${tarjeta['nombre_tarjeta']}"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text("Ingresa el 'Pago para no generar intereses' que marca la app de tu banco:", style: TextStyle(fontSize: 13, color: Colors.grey)),
+            const SizedBox(height: 15),
+            TextField(
+              controller: deudaCtrl,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(labelText: "Deuda Total", prefixText: "\$ ", border: OutlineInputBorder()),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar", style: TextStyle(color: Colors.grey))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF004481)),
+            onPressed: () async {
+              double deuda = double.tryParse(deudaCtrl.text) ?? 0;
+              if (deuda > 0) {
+                Navigator.pop(context);
+                final db = await DatabaseHelper.instance.database;
+                await db.update(
+                  'tarjeta', 
+                  {'monto_minimo': (deuda * 100).toInt()},
+                  where: 'id = ?', 
+                  whereArgs: [tarjeta['id']]
+                );
+                Fluttertoast.showToast(msg: "Deuda registrada. Presupuesto ajustado.");
+                cargarDatos();
+              }
+            },
+            child: const Text("Declarar", style: TextStyle(color: Colors.white)),
+          )
+        ],
+      )
+    );
   }
 
   void _mostrarDialogoPago(Map<String, dynamic> tarjeta) {
@@ -76,24 +162,17 @@ class TarjetasScreenState extends State<TarjetasScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text("Puedes modificar el monto para pagar el mínimo o el total para no generar intereses.", style: TextStyle(fontSize: 12, color: Colors.grey)),
+            const Text("Confirma el monto que transferirás a tu tarjeta.", style: TextStyle(fontSize: 12, color: Colors.grey)),
             const SizedBox(height: 15),
             TextField(
               controller: pagoCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
-                labelText: "Monto a pagar",
-                prefixText: "\$ ",
-                border: OutlineInputBorder()
-              ),
+              decoration: const InputDecoration(labelText: "Monto a pagar", prefixText: "\$ ", border: OutlineInputBorder()),
             ),
           ],
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context), 
-            child: const Text("Cancelar", style: TextStyle(color: Colors.grey))
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar", style: TextStyle(color: Colors.grey))),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF004481)),
             onPressed: () {
@@ -101,8 +180,6 @@ class TarjetasScreenState extends State<TarjetasScreen> {
               if (montoReal > 0) {
                 Navigator.pop(context);
                 pagarTarjeta(tarjeta, montoReal);
-              } else {
-                Fluttertoast.showToast(msg: "Ingresa un monto válido");
               }
             },
             child: const Text("Confirmar Pago", style: TextStyle(color: Colors.white)),
@@ -115,11 +192,9 @@ class TarjetasScreenState extends State<TarjetasScreen> {
   int _calcularDiasRestantes(int diaObjetivo) {
     DateTime hoy = DateTime.now();
     DateTime fechaObjetivo = DateTime(hoy.year, hoy.month, diaObjetivo);
-    
     if (hoy.day > diaObjetivo) {
       fechaObjetivo = DateTime(hoy.year, hoy.month + 1, diaObjetivo);
     }
-    
     DateTime soloHoy = DateTime(hoy.year, hoy.month, hoy.day);
     return fechaObjetivo.difference(soloHoy).inDays;
   }
@@ -138,7 +213,7 @@ class TarjetasScreenState extends State<TarjetasScreen> {
         title: const Text("¿Eliminar tarjeta?"),
         content: Text("Estás a punto de borrar la tarjeta $nombre. Esta acción no se puede deshacer."),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar")),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar", style: TextStyle(color: Colors.grey))),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () {
@@ -152,25 +227,22 @@ class TarjetasScreenState extends State<TarjetasScreen> {
     );
   }
 
+  // --- CÁLCULOS DE HIERRO ---
   Future<void> cargarDatos() async {
     setState(() => _cargando = true);
-    debugPrint("Carga de datos de tarjetas");
-
+    
     try {
       DatabaseHelper db = DatabaseHelper.instance;
       final baseDatos = await db.database;
 
-      double pres = await db.calcularPresupuestoDiarioSeguro();
       List<Map<String, dynamic>> tarjList = await baseDatos.query('tarjeta', where: 'usuario_id = ?', whereArgs: [db.userId]);
 
-      String nombreDinamico = "Usuario";
-      List<Map<String, dynamic>> userList = await baseDatos.query('usuario', where: 'id = ?', whereArgs: [db.userId], limit: 1);
-      
+      // 1. Reinicio mensual: Si cambió el mes, la tarjeta vuelve a nacer limpia (Fase 1)
       for (var t in tarjList) {
         if (t['pagada'] == 1 && t['ultimo_mes_pagado'] != DateTime.now().month) {
           await baseDatos.update(
             'tarjeta', 
-            {'pagada': 0}, 
+            {'pagada': 0, 'monto_minimo': 0}, // Borrón y cuenta nueva
             where: 'id = ?', 
             whereArgs: [t['id']]
           );
@@ -179,49 +251,61 @@ class TarjetasScreenState extends State<TarjetasScreen> {
       
       tarjList = await baseDatos.query('tarjeta', where: 'usuario_id = ?', whereArgs: [db.userId]);
 
-      if (userList.isNotEmpty) {
-        nombreDinamico = userList.first['nombre'] ?? "Usuario";
-      }
+      String nombreDinamico = "Usuario";
+      List<Map<String, dynamic>> userList = await baseDatos.query('usuario', where: 'id = ?', whereArgs: [db.userId], limit: 1);
+      if (userList.isNotEmpty) nombreDinamico = userList.first['nombre'] ?? "Usuario";
+
+      // 2. Extracción de Balance Real
+      int balanceActualCentavos = await db.obtenerBalance(db.userId!);
+      double balancePesos = balanceActualCentavos / 100;
 
       final ingresosData = await baseDatos.rawQuery("SELECT SUM(monto) as total FROM movimiento WHERE tipo = 'ingreso' AND usuario_id = ?", [db.userId]);
-      double ingresosCentavos = (ingresosData.first['total'] as num?)?.toDouble() ?? 0.0;
-      double ingresosPesos = ingresosCentavos / 100;
+      double ingresosPesos = ((ingresosData.first['total'] as num?)?.toDouble() ?? 0.0) / 100;
+
+      // 3. Matemática del Presupuesto
+      double obligacionesTotales = 0.0;
+      for(var t in tarjList) {
+        if (t['pagada'] == 0 && t['monto_minimo'] != null) {
+          obligacionesTotales += (t['monto_minimo'] as num).toDouble() / 100;
+        }
+      }
+      
+      // Congelamos el dinero de las tarjetas
+      double libreParaGastar = balancePesos - obligacionesTotales;
+      if (libreParaGastar < 0) libreParaGastar = 0;
+      
+      DateTime hoy = DateTime.now();
+      int diasRestantesMes = DateTime(hoy.year, hoy.month + 1, 0).day - hoy.day + 1;
+      
+      // Este es tu presupuesto indestructible
+      double presupuestoDiarioReal = libreParaGastar / diasRestantesMes;
 
       double porcentaje = 0.0;
       if (ingresosPesos > 0) {
-         double obligacionesTotales = 0.0;
-         for(var t in tarjList) {
-           if (t['pagada'] == 0 || t['pagada'] == null) {
-             obligacionesTotales += (t['monto_minimo'] as num).toDouble() / 100;
-           }
-         }
-         
-         double libre = ingresosPesos - obligacionesTotales;
-         if (libre < 0) libre = 0;
-         
-         porcentaje = libre / ingresosPesos; 
+         porcentaje = (ingresosPesos - obligacionesTotales) / ingresosPesos; 
+         if (porcentaje < 0) porcentaje = 0;
       }
 
       setState(() {
-        _presupuesto = pres;
+        _presupuesto = presupuestoDiarioReal;
         _misTarjetas = tarjList;
         _porcentajeSalud = porcentaje;
         _nombreUsuario = nombreDinamico;
       });
 
     } catch (e) {
-      debugPrint("--- ERROR CRÍTICO EN CARGA: $e ---");
+      debugPrint("Error: $e");
     } finally {
       setState(() => _cargando = false);
     }
   }
 
+  // --- FASE 1: CREACIÓN DE TARJETA ---
   void _mostrarFormularioNuevaTarjeta(BuildContext context) {
     final nombreCtrl = TextEditingController();
     final numeroCtrl = TextEditingController();
     final corteCtrl = TextEditingController();
     final pagoCtrl = TextEditingController();
-    final montoCtrl = TextEditingController();
 
     showModalBottomSheet(
       context: context,
@@ -273,8 +357,6 @@ class TarjetasScreenState extends State<TarjetasScreen> {
                     keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Día de Pago", border: OutlineInputBorder()))),
                   ],
                 ),
-                const SizedBox(height: 15),
-                TextField(controller: montoCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: "Pago para no generar intereses (\$)", border: OutlineInputBorder())),
                 const SizedBox(height: 25),
                 SizedBox(
                   width: double.infinity,
@@ -282,9 +364,7 @@ class TarjetasScreenState extends State<TarjetasScreen> {
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF004481), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
                     onPressed: () async {
-                      double montoPesos = double.tryParse(montoCtrl.text) ?? 0.0;
-                      int montoCentavos = (montoPesos * 100).toInt(); 
-                      
+                      debugPrint("Tarjetita guardada");
                       int? idUsuario = DatabaseHelper.instance.userId;
                       if (idUsuario == null) return;
 
@@ -295,12 +375,13 @@ class TarjetasScreenState extends State<TarjetasScreen> {
                         'tipo': 'Credito',
                         'corte_dia': int.tryParse(corteCtrl.text) ?? 1,
                         'pago_dia': int.tryParse(pagoCtrl.text) ?? 1,
-                        'monto_minimo': montoCentavos,
+                        'monto_minimo': 0, // Nace en Fase 1 (Reposo)
                         'pagada': 0,
                         'ultimo_mes_pagado': 0
                       };
 
                       await DatabaseHelper.instance.insertarTarjeta(nuevaTarjeta);
+                      await _programarAlertasTarjeta(nuevaTarjeta['nombre_tarjeta'], nuevaTarjeta['corte_dia'], nuevaTarjeta['pago_dia']);
                       if (context.mounted) Navigator.pop(context);
                       await cargarDatos(); 
                     },
@@ -379,8 +460,14 @@ class TarjetasScreenState extends State<TarjetasScreen> {
                         itemCount: _misTarjetas.length,
                         itemBuilder: (context, index) {
                           final t = _misTarjetas[index];
-                          int diasRestantes = _calcularDiasRestantes(t['corte_dia'] ?? 1);
+                          
+                          // Lógica visual basada en la Máquina de Estados
                           bool estaPagada = t['pagada'] == 1;
+                          bool enReposo = !estaPagada && (t['monto_minimo'] == 0 || t['monto_minimo'] == null);
+                          bool conDeuda = !estaPagada && !enReposo;
+
+                          int diasParaCorte = _calcularDiasRestantes(t['corte_dia'] ?? 1);
+                          int diasParaPago = _calcularDiasRestantes(t['pago_dia'] ?? 1);
 
                           return Column(
                             children: [
@@ -391,7 +478,8 @@ class TarjetasScreenState extends State<TarjetasScreen> {
                                     margin: const EdgeInsets.symmetric(horizontal: 8),
                                     padding: const EdgeInsets.all(15),
                                     decoration: BoxDecoration(
-                                      color: estaPagada ? Colors.grey.shade400 : const Color(0xFF004481),
+                                      // Colores semánticos: Azul (Reposo), Naranja/Rojo (Deuda), Gris (Pagada)
+                                      color: estaPagada ? Colors.grey.shade400 : (conDeuda ? const Color(0xFFD35400) : const Color(0xFF004481)),
                                       borderRadius: BorderRadius.circular(20),
                                       boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 10, offset: const Offset(0, 5))],
                                     ),
@@ -416,23 +504,21 @@ class TarjetasScreenState extends State<TarjetasScreen> {
                                     ),
                                   ),
                                   
+                                  // Menú Dinámico
                                   Positioned(
                                     top: 5,
                                     right: 10,
                                     child: PopupMenuButton<String>(
                                       icon: const Icon(Icons.more_vert, color: Colors.white),
                                       onSelected: (val) {
-                                        if (val == 'pagar') {
-                                          if (estaPagada) {
-                                            Fluttertoast.showToast(msg: "Ya pagaste esta tarjeta este mes");
-                                          } else {
-                                            _mostrarDialogoPago(t);
-                                          }
-                                        }
+                                        if (val == 'declarar') _declararCorte(t);
+                                        if (val == 'pagar') _mostrarDialogoPago(t);
                                         if (val == 'borrar') _confirmarEliminacion(t['id'], t['nombre_tarjeta']);
                                       },
                                       itemBuilder: (context) => [
-                                        const PopupMenuItem(value: 'pagar', child: Text("Realizar Pago")),
+                                        if (enReposo) const PopupMenuItem(value: 'declarar', child: Text("Declarar Corte")),
+                                        if (conDeuda) const PopupMenuItem(value: 'pagar', child: Text("Realizar Pago")),
+                                        if (conDeuda) const PopupMenuItem(value: 'declarar', child: Text("Editar Deuda")),
                                         const PopupMenuItem(value: 'borrar', child: Text("Eliminar", style: TextStyle(color: Colors.red))),
                                       ],
                                     ),
@@ -442,10 +528,7 @@ class TarjetasScreenState extends State<TarjetasScreen> {
                                     Positioned.fill(
                                       child: Container(
                                         margin: const EdgeInsets.symmetric(horizontal: 8),
-                                        decoration: BoxDecoration(
-                                          color: Colors.white.withOpacity(0.7),
-                                          borderRadius: BorderRadius.circular(20),
-                                        ),
+                                        decoration: BoxDecoration(color: Colors.white.withOpacity(0.7), borderRadius: BorderRadius.circular(20)),
                                         child: const Center(
                                           child: Text("PAGADA", style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.green)),
                                         ),
@@ -454,29 +537,22 @@ class TarjetasScreenState extends State<TarjetasScreen> {
                                 ],
                               ),
                               const SizedBox(height: 12),
-                              Text(
-                                estaPagada 
-                                  ? "\"Tarjeta al corriente este mes\"" 
-                                  : "\"fecha de corte en $diasRestantes días\"", 
-                                style: TextStyle(
-                                  color: estaPagada ? Colors.green : const Color(0xFFD9A06F), 
-                                  fontStyle: FontStyle.italic, 
-                                  fontSize: 14
-                                ),
-                              ),
+                              // Subtítulos Dinámicos
+                              if (estaPagada)
+                                const Text("\"Tarjeta al corriente este mes\"", style: TextStyle(color: Colors.green, fontStyle: FontStyle.italic, fontSize: 14))
+                              else if (enReposo)
+                                Text("\"Día de corte en $diasParaCorte días\"", style: const TextStyle(color: Color(0xFF004481), fontStyle: FontStyle.italic, fontSize: 14))
+                              else if (conDeuda)
+                                Text("⚠️ Pago de \$${(t['monto_minimo']/100).toStringAsFixed(2)} en $diasParaPago días", style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 14)),
                             ],
                           );
                         },
                       ),
                     ),
                     const SizedBox(height: 5),
-                    const Center(
-                      child: Text("👉 Desliza para ver tus otras tarjetas", style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic, fontSize: 12)),
-                    ),
+                    const Center(child: Text("👉 Desliza para ver tus otras tarjetas", style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic, fontSize: 12))),
                   ] else ...[
-                    const Center(
-                      child: Text("No tienes tarjetas registradas.\nPresiona el botón '+' para agregar una.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
-                    )
+                    const Center(child: Text("No tienes tarjetas registradas.\nPresiona el botón '+' para agregar una.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)))
                   ],
 
                   const SizedBox(height: 45),
@@ -509,7 +585,7 @@ class TarjetasScreenState extends State<TarjetasScreen> {
                           ),
                         ),
                         const SizedBox(height: 20),
-                        const Text("Salud financiera", style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500, color: Colors.black87))
+                        const Text("Porcentaje de salud de deuda", style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500, color: Colors.black87))
                       ],
                     ),
                   ),
@@ -521,9 +597,7 @@ class TarjetasScreenState extends State<TarjetasScreen> {
       floatingActionButton: FloatingActionButton(
         backgroundColor: const Color(0xFF004481),
         child: const Icon(Icons.add, color: Colors.white),
-        onPressed: () {
-          _mostrarFormularioNuevaTarjeta(context);
-        },
+        onPressed: () => _mostrarFormularioNuevaTarjeta(context),
       ),
     );
   }

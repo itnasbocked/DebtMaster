@@ -13,9 +13,11 @@ class _RegPageState extends State<RegPage> {
   final _correoCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   final _confirmPassCtrl = TextEditingController();
-  final _ingresoCtrl = TextEditingController(); // Nuevo controlador para el ingreso
+  final _ingresoCtrl = TextEditingController();
 
-  bool _procesando = false; // Variable para evitar múltiples envíos
+  bool _procesando = false;
+
+  bool _obscurePass = true;
 
   @override
   Widget build(BuildContext context) {
@@ -124,7 +126,7 @@ class _RegPageState extends State<RegPage> {
                               borderRadius: BorderRadius.circular(16),
                             ),
                           ),
-                          onPressed: _procesando ? null : _ejecutarRegistro, // Desactiva el botón si está procesando
+                          onPressed: _procesando ? null : _ejecutarRegistro,
                           child: _procesando 
                             ? const CircularProgressIndicator(color: Colors.white)
                             : const Row(
@@ -172,16 +174,13 @@ class _RegPageState extends State<RegPage> {
     );
   }
 
-  // --- LÓGICA DE REGISTRO ---
   Future<void> _ejecutarRegistro() async {
-    // 1. Obtener los valores de los controladores
     String nombre = _usuarioCtrl.text.trim();
     String correo = _correoCtrl.text.trim();
     String pass = _passCtrl.text;
     String confirmPass = _confirmPassCtrl.text;
     String ingresoTexto = _ingresoCtrl.text.trim();
 
-    // 2. Validaciones locales
     if (nombre.isEmpty || correo.isEmpty || pass.isEmpty || ingresoTexto.isEmpty) {
       _mostrarMensaje("Por favor, llena todos los campos");
       return;
@@ -198,13 +197,10 @@ class _RegPageState extends State<RegPage> {
       return;
     }
 
-    // 3. Conversión a centavos (regla de arquitectura de la BD)
     int ingresoCentavos = (ingresoPesos * 100).toInt();
 
-    // Bloquear el botón mientras se procesa
     setState(() => _procesando = true);
 
-    // 4. Ejecutar la consulta en SQLite
     String resultado = await DatabaseHelper.instance.registrarUsuario(
       nombre, 
       correo, 
@@ -212,16 +208,15 @@ class _RegPageState extends State<RegPage> {
       ingresoCentavos
     );
 
-    // 5. Manejar el resultado
     setState(() => _procesando = false);
 
     if (resultado == "Exito") {
       _mostrarMensaje("Cuenta creada exitosamente. Por favor inicia sesión.");
       if (mounted) {
-        Navigator.pop(context); // Regresa al login
+        Navigator.pop(context);
       }
     } else {
-      _mostrarMensaje(resultado); // Muestra el error (ej. "El correo ya está registrado")
+      _mostrarMensaje(resultado);
     }
   }
 
@@ -264,7 +259,7 @@ class _RegPageState extends State<RegPage> {
       ),
       child: TextField(
         controller: controller,
-        obscureText: isPassword,
+        obscureText: isPassword ? _obscurePass : false,
         keyboardType: keyboardType,
         style: const TextStyle(fontSize: 15),
         decoration: InputDecoration(
@@ -273,9 +268,19 @@ class _RegPageState extends State<RegPage> {
           prefixIcon: Icon(icon, color: const Color(0xFF8294C4)),
           border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        ),
+          suffixIcon: isPassword 
+            ? IconButton(
+                icon: Icon(
+                  _obscurePass ? Icons.visibility_off : Icons.visibility,
+                  color: const Color(0xFF8294C4),
+                ),
+                onPressed: () {
+                  setState(() => _obscurePass = !_obscurePass);
+                },
+              )
+            : null,
       ),
-    );
+    ));
   }
 
   @override

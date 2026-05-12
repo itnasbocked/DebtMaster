@@ -1,5 +1,8 @@
 import 'package:dm/data/database/database_helper.dart';
+import 'package:dm/logic/notification_service.dart';
 import 'package:flutter/material.dart';
+import 'package:fluttertoast/fluttertoast.dart';
+import 'package:table_calendar/table_calendar.dart';
 
 class CalendarioScreen extends StatefulWidget {
   const CalendarioScreen({super.key});
@@ -10,30 +13,189 @@ class CalendarioScreen extends StatefulWidget {
 
 class CalendarioScreenState extends State<CalendarioScreen> {
   DateTime _fechaSeleccionada = DateTime.now();
+  DateTime _mesEnVista = DateTime.now();
   List<Map<String, dynamic>> _eventosDelDia = [];
+  
+  // Cache de marcadores en RAM para acceso ultra rápido (Separado por estado)
+  Set<String> _diasConMovimientosReales = {}; 
+  Set<int> _diasConPlanesRecurrentes = {}; 
+  Set<String> _diasConPlanesUnicos = {};
+  
   bool _cargando = true;
 
   @override
   void initState() {
     super.initState();
+    _cargarMarcadores();
     cargarEventos();
+  }
+
+  Future<void> _sincronizarTodo() async {
+    await _cargarMarcadores();
+    await cargarEventos();
   }
 
   String _formatearFecha(DateTime fecha) {
     return "${fecha.year}-${fecha.month.toString().padLeft(2, '0')}-${fecha.day.toString().padLeft(2, '0')}";
   }
 
+  Future<void> _cargarMarcadores() async {
+    int? idUsuario = DatabaseHelper.instance.userId;
+    if (idUsuario == null) return;
+
+    final db = await DatabaseHelper.instance.database;
+    
+    // 1. Movimientos reales ya confirmados
+    final resReal = await db.rawQuery(
+      "SELECT DISTINCT fecha FROM movimiento WHERE usuario_id = ?", [idUsuario]
+    );
+
+    // 2. Planes recurrentes (mensuales) extraídos por día
+    final resRec = await db.rawQuery(
+      "SELECT DISTINCT CAST(SUBSTR(fecha_pago, 9, 2) AS INTEGER) as dia FROM gasto_fijo WHERE usuario_id = ? AND frecuencia = 'mensual' "
+      "UNION SELECT DISTINCT CAST(SUBSTR(fecha_cobro, 9, 2) AS INTEGER) as dia FROM ingreso_fijo WHERE usuario_id = ? AND frecuencia = 'mensual'", 
+      [idUsuario, idUsuario]
+    );
+
+    // 3. Planes únicos extraídos por fecha exacta
+    final resUnico = await db.rawQuery(
+      "SELECT DISTINCT fecha_pago as fecha FROM gasto_fijo WHERE usuario_id = ? AND frecuencia = 'unica' "
+      "UNION SELECT DISTINCT fecha_cobro as fecha FROM ingreso_fijo WHERE usuario_id = ? AND frecuencia = 'unica'",
+      [idUsuario, idUsuario]
+    );
+
+    if (mounted) {
+      setState(() {
+        _diasConMovimientosReales = resReal.map((row) => row['fecha'] as String).toSet();
+        _diasConPlanesRecurrentes = resRec.map((row) => row['dia'] as int).toSet();
+        _diasConPlanesUnicos = resUnico.map((row) => row['fecha'] as String).toSet();
+      });
+    }
+  }
+
   Future<void> cargarEventos() async {
     setState(() => _cargando = true);
+    int? idUsuario = DatabaseHelper.instance.userId;
     String fechaStr = _formatearFecha(_fechaSeleccionada);
+    int diaSeleccionado = _fechaSeleccionada.day;
+
     try {
-      final eventos = await DatabaseHelper.instance.obtenerMovimientosPorFecha(fechaStr);
-      setState(() => _eventosDelDia = eventos);
+      final db = await DatabaseHelper.instance.database;
+
+      final movimientos = await DatabaseHelper.instance.obtenerMovimientosPorFecha(fechaStr);
+
+      final planeadosRaw = await db.rawQuery(
+        "SELECT *, 'egreso' as tipo, nombre_gasto as descripcion FROM gasto_fijo WHERE usuario_id = ? AND ((frecuencia = 'mensual' AND CAST(SUBSTR(fecha_pago, 9, 2) AS INTEGER) = ?) OR (frecuencia = 'unica' AND fecha_pago = ?)) "
+        "UNION "
+        "SELECT *, 'ingreso' as tipo, nombre_ingreso as descripcion FROM ingreso_fijo WHERE usuario_id = ? AND ((frecuencia = 'mensual' AND CAST(SUBSTR(fecha_cobro, 9, 2) AS INTEGER) = ?) OR (frecuencia = 'unica' AND fecha_cobro = ?))",
+        [idUsuario, diaSeleccionado, fechaStr, idUsuario, diaSeleccionado, fechaStr]
+      );
+
+      List<Map<String, dynamic>> planesPendientes = [];
+      for (var p in planeadosRaw) {
+        Object? nombreBase = p['descripcion'];
+        bool esRecurrente = p['frecuencia'] == 'mensual';
+        bool yaExiste = movimientos.any((m) => (m['descripcion']) == nombreBase);
+        if (!(esRecurrente && yaExiste)) {
+          planesPendientes.add({...p, 'esPlan': true});
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _eventosDelDia = [
+            ...movimientos.map((m) => {...m, 'esPlan': false}), 
+            ...planesPendientes
+          ];
+        });
+      }
     } catch (e) {
-      debugPrint("Error al consultar DB: $e");
+      debugPrint("Error al sincronizar recurrentes: $e");
     } finally {
-      setState(() => _cargando = false);
+      if (mounted) setState(() => _cargando = false);
     }
+  }
+
+  void _confirmarPlan(Map<String, dynamic> plan) {
+    bool esRecurrente = plan['frecuencia'] == 'mensual';
+    String nombreReal = plan['descripcion'];
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        titlePadding: const EdgeInsets.only(left: 24, top: 15, right: 10, bottom: 10),
+        
+        title: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: Text(
+                esRecurrente ? "$nombreReal - Evento Mensual" : "$nombreReal - Evento Único", 
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)
+              )
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline, color: Colors.red, size: 28),
+              tooltip: "Eliminar plan permanentemente",
+              onPressed: () async {
+                Navigator.pop(context);
+                final db = await DatabaseHelper.instance.database;
+                String tabla = plan['tipo'] == 'egreso' ? 'gasto_fijo' : 'ingreso_fijo';
+                
+                await db.delete(tabla, where: 'id = ?', whereArgs: [plan['id']]);
+                
+                Fluttertoast.showToast(msg: esRecurrente ? "Evento mensual eliminado" : "Evento eliminado");
+                _sincronizarTodo();
+              }, 
+            ),
+          ],
+        ),
+        
+        content: Text(
+          esRecurrente 
+            ? "¿Deseas registrar este movimiento en tu balance real de hoy? (Para cancelar este plan en el futuro, usa el icono de papelera)."
+            : "¿Deseas registrar este movimiento en tu balance real de hoy?"
+        ),
+        
+        actionsPadding: const EdgeInsets.only(right: 20, bottom: 15),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context), 
+            child: const Text("Cancelar", style: TextStyle(color: Colors.grey, fontSize: 16))
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF004481),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10)
+            ),
+            onPressed: () async {
+              Navigator.pop(context);
+              
+              await DatabaseHelper.instance.insertarMovimiento({
+                'usuario_id': plan['usuario_id'],
+                'monto': plan['monto'],
+                'fecha': _formatearFecha(_fechaSeleccionada),
+                'tipo': plan['tipo'],
+                'descripcion': nombreReal,
+                'frecuencia': 'ninguna'
+              });
+
+              if (!esRecurrente) {
+                final db = await DatabaseHelper.instance.database;
+                String tabla = plan['tipo'] == 'egreso' ? 'gasto_fijo' : 'ingreso_fijo';
+                await db.delete(tabla, where: 'id = ?', whereArgs: [plan['id']]);
+              }
+
+              Fluttertoast.showToast(msg: "Movimiento confirmado");
+              _sincronizarTodo();
+            },
+            child: const Text("Confirmar", style: TextStyle(color: Colors.white, fontSize: 16)),
+          )
+        ],
+      ),
+    );
   }
 
   void _mostrarFormularioEvento(BuildContext context) {
@@ -42,6 +204,8 @@ class CalendarioScreenState extends State<CalendarioScreen> {
     String tipo = 'egreso';
     bool esFijo = false;
     bool crearAlerta = false;
+
+    bool guardando = false;
 
     showModalBottomSheet(
       context: context,
@@ -73,31 +237,71 @@ class CalendarioScreenState extends State<CalendarioScreen> {
                 width: double.infinity, height: 50,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF004481), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                  onPressed: () async {
-                    int montoCen = ((double.tryParse(montoCtrl.text) ?? 0) * 100).toInt();
-                    String fecha = _formatearFecha(_fechaSeleccionada);
+                  // ignore: dead_code
+                  onPressed: guardando ? null: () async {
+                    setModalState(() => guardando = true);
 
-                    int? idUsuario = DatabaseHelper.instance.userId;
-                    if (idUsuario == null) return;
+                    try{
+                      int montoCen = ((double.tryParse(montoCtrl.text) ?? 0) * 100).toInt();
+                      String fecha = _formatearFecha(_fechaSeleccionada);
+                      int? idUsuario = DatabaseHelper.instance.userId;
+                      if (idUsuario == null) return;
 
-                    await DatabaseHelper.instance.insertarMovimiento({
-                      'usuario_id': idUsuario, 'monto': montoCen, 'fecha': fecha, 'tipo': tipo, 'descripcion': descCtrl.text, 'frecuencia': 'ninguna'
-                    });
-
-                    if (esFijo) {
-                      if (tipo == 'egreso') {
-                        await DatabaseHelper.instance.insertarGastoFijo({'usuario_id': idUsuario, 'nombre_gasto': descCtrl.text, 'monto': montoCen, 'frecuencia': 'mensual', 'fecha_pago': fecha});
-                      } else {
-                        await DatabaseHelper.instance.insertarIngresoFijo({'usuario_id': idUsuario, 'nombre_ingreso': descCtrl.text, 'monto': montoCen, 'frecuencia': 'mensual', 'fecha_cobro': fecha});
+                      if (descCtrl.text.isEmpty || montoCen <= 0) {
+                        Fluttertoast.showToast(msg: "Por favor completa todos los campos correctamente.", backgroundColor: Colors.red);
+                        setModalState(() => guardando = false);
+                        return;
                       }
-                    }
 
-                    if (crearAlerta) {
-                      await DatabaseHelper.instance.insertarAlerta({'usuario_id': idUsuario, 'tipo': 'recordatorio', 'fecha_alerta': fecha, 'mensaje': 'Evento: ${descCtrl.text}'});
-                    }
+                      if (tipo == 'egreso') {
+                        await DatabaseHelper.instance.insertarGastoFijo({
+                          'usuario_id': idUsuario, 'nombre_gasto': descCtrl.text, 'monto': montoCen, 
+                          'frecuencia': esFijo ? 'mensual' : 'unica', 'fecha_pago': fecha
+                        });
+                      } else {
+                        await DatabaseHelper.instance.insertarIngresoFijo({
+                          'usuario_id': idUsuario, 'nombre_ingreso': descCtrl.text, 'monto': montoCen, 
+                          'frecuencia': esFijo ? 'mensual' : 'unica', 'fecha_cobro': fecha
+                        });
+                      }
 
-                    if (context.mounted) Navigator.pop(context);
-                    cargarEventos();
+                      if (crearAlerta) {
+                        await DatabaseHelper.instance.insertarAlerta({'usuario_id': idUsuario, 'tipo': 'recordatorio', 'fecha_alerta': fecha, 'mensaje': 'Evento: ${descCtrl.text}'});
+                        
+                        DateTime ahora = DateTime.now();
+                        DateTime fechaEvento;
+
+                        if(_fechaSeleccionada.year == ahora.year &&
+                        _fechaSeleccionada.month == ahora.month &&
+                        _fechaSeleccionada.day == ahora.day){
+                          debugPrint("Alarmita");
+                          fechaEvento = ahora.add(const Duration(seconds: 10));
+                        } else {
+                          fechaEvento = DateTime(_fechaSeleccionada.year, _fechaSeleccionada.month, _fechaSeleccionada.day, 9, 0);
+                        }
+                        
+                        try{
+                          await NotificationService().programarNotificacion(
+                          DateTime.now().millisecondsSinceEpoch ~/ 1000, 
+                          "Recordatorio: ${descCtrl.text}", 
+                          "Evento programado para el ${_fechaSeleccionada.day}/${_fechaSeleccionada.month}/${_fechaSeleccionada.year}", 
+                          fechaEvento
+                          );
+                          Fluttertoast.showToast(msg: "Alerta programada exitosamente!", toastLength: Toast.LENGTH_SHORT, backgroundColor: Colors.green, textColor: Colors.white, gravity: ToastGravity.BOTTOM);
+                        }catch(e){
+                          debugPrint("DEBUG: Error al programar notificación: $e");
+                        }
+                      }
+
+                      if (context.mounted) Navigator.pop(context);
+                      
+                      await _cargarMarcadores();
+                      await cargarEventos();
+                    } catch(e){
+                      setModalState(() => guardando = false);
+                      Fluttertoast.showToast(msg: "Error al guardar evento: $e", backgroundColor: Colors.red);
+                      return;
+                    }
                   },
                   child: const Text("Guardar", style: TextStyle(color: Colors.white, fontSize: 16)),
                 ),
@@ -114,71 +318,89 @@ class CalendarioScreenState extends State<CalendarioScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF4F6F9),
-      
       body: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          
           Container(
             margin: const EdgeInsets.all(16.0),
             decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, 5),
-                )
-              ],
+              color: Colors.white, borderRadius: BorderRadius.circular(20),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)]
             ),
-            
-            child: CalendarDatePicker(
-              initialDate: _fechaSeleccionada,
-              firstDate: DateTime(2020),
-              lastDate: DateTime(2030),
-              onDateChanged: (DateTime nuevaFecha) {
-                setState(() {
-                  _fechaSeleccionada = nuevaFecha;
-                });
+            child: TableCalendar(
+              firstDay: DateTime(2020), lastDay: DateTime(2030),
+              focusedDay: _mesEnVista, currentDay: _fechaSeleccionada,
+              availableCalendarFormats: const { CalendarFormat.month: 'Mes' },
+              headerStyle: const HeaderStyle(titleCentered: true, formatButtonVisible: false),
+              onDaySelected: (selectedDay, focusedDay) {
+                setState(() { _fechaSeleccionada = selectedDay; _mesEnVista = focusedDay; });
                 cargarEventos();
               },
+              onPageChanged: (focusedDay) => _mesEnVista = focusedDay,
+              
+              calendarBuilders: CalendarBuilders(
+                markerBuilder: (context, date, events) {
+                  String fechaFormateada = _formatearFecha(date);
+                  
+                  bool tieneReal = _diasConMovimientosReales.contains(fechaFormateada);
+                  bool tienePlan = _diasConPlanesRecurrentes.contains(date.day) || _diasConPlanesUnicos.contains(fechaFormateada);
+
+                  if (tieneReal || tienePlan) {
+                    return Positioned(
+                      bottom: 4,
+                      child: Container(
+                        width: 7, height: 7,
+                        decoration: BoxDecoration(
+                          // Ámbar si es un plan pendiente, Azul si ya es un movimiento real
+                          color: tienePlan ? Colors.amber : const Color(0xFF004481),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    );
+                  }
+                  return null;
+                },
+              ),
             ),
           ),
-
-          const SizedBox(height: 10),
-
+          
+          const SizedBox(height: 5),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24.0),
-            child: Text(
-              "Eventos del ${_fechaSeleccionada.day}/${_fechaSeleccionada.month}/${_fechaSeleccionada.year}",
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                "Eventos del ${_fechaSeleccionada.day}/${_fechaSeleccionada.month}/${_fechaSeleccionada.year}",
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
+              ),
             ),
           ),
-          const SizedBox(height: 15),
+          const SizedBox(height: 10),
 
           Expanded(
             child: _cargando 
               ? const Center(child: CircularProgressIndicator())
               : _eventosDelDia.isEmpty
-                ? const Center(
-                    child: Text("Sin eventos programados.", style: TextStyle(color: Colors.grey))
-                  )
+                ? const Center(child: Text("Día libre, sin eventos.", style: TextStyle(color: Colors.grey)))
                 : ListView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     itemCount: _eventosDelDia.length,
                     itemBuilder: (context, i) {
                       final ev = _eventosDelDia[i];
                       bool esIngreso = ev['tipo'] == 'ingreso';
+                      bool esPlan = ev['esPlan'] == true;
                       double montoPesos = (ev['monto'] as int) / 100;
 
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(16),
-                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4))],
+                      return GestureDetector(
+                        onTap: esPlan ? () => _confirmarPlan(ev) : null,
+                        child: Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            // Delineado Ámbar si es un plan por confirmar
+                            border: esPlan ? Border.all(color: Colors.amber, width: 2.0) : null,
+                            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4))],
                         ),
                         child: Row(
                           children: [
@@ -197,7 +419,11 @@ class CalendarioScreenState extends State<CalendarioScreen> {
                             Expanded(
                               child: Text(
                                 ev['descripcion'] ?? "Sin nombre",
-                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
+                                style: TextStyle(
+                                  fontSize: 16, 
+                                  fontWeight: FontWeight.bold, 
+                                  color: esPlan ? Colors.amber.shade900 : Colors.black87
+                                ),
                               ),
                             ),
                             Text(
@@ -210,7 +436,7 @@ class CalendarioScreenState extends State<CalendarioScreen> {
                             ),
                           ],
                         ),
-                      );
+                      ));
                     },
                   ),
           ),

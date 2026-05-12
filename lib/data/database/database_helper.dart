@@ -67,18 +67,19 @@ class DatabaseHelper {
 
     // 2. Tabla de Tarjetas
     await db.execute('''
-    CREATE TABLE tarjeta (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      usuario_id INTEGER NOT NULL,
-      nombre_tarjeta TEXT,
-      numero_tarjeta TEXT, -- NUEVA COLUMNA
-      tipo TEXT,
-      corte_dia INTEGER,
-      pago_dia INTEGER,
-      monto_minimo INTEGER,
-      FOREIGN KEY (usuario_id) REFERENCES usuario(id)
-    )
-  ''');
+  CREATE TABLE tarjeta (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER,
+    nombre_tarjeta TEXT,
+    numero_tarjeta TEXT,
+    tipo TEXT,
+    corte_dia INTEGER,
+    pago_dia INTEGER,
+    monto_minimo INTEGER,
+    pagada INTEGER,
+    ultimo_mes_pagado INTEGER
+  )
+''');
 
     // 3. Tabla de Gastos Fijos
     await db.execute('''
