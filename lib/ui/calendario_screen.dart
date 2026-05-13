@@ -45,19 +45,16 @@ class CalendarioScreenState extends State<CalendarioScreen> {
 
     final db = await DatabaseHelper.instance.database;
     
-    // 1. Movimientos reales ya confirmados
     final resReal = await db.rawQuery(
       "SELECT DISTINCT fecha FROM movimiento WHERE usuario_id = ?", [idUsuario]
     );
 
-    // 2. Planes recurrentes (mensuales) extraídos por día
     final resRec = await db.rawQuery(
       "SELECT DISTINCT CAST(SUBSTR(fecha_pago, 9, 2) AS INTEGER) as dia FROM gasto_fijo WHERE usuario_id = ? AND frecuencia = 'mensual' "
       "UNION SELECT DISTINCT CAST(SUBSTR(fecha_cobro, 9, 2) AS INTEGER) as dia FROM ingreso_fijo WHERE usuario_id = ? AND frecuencia = 'mensual'", 
       [idUsuario, idUsuario]
     );
 
-    // 3. Planes únicos extraídos por fecha exacta
     final resUnico = await db.rawQuery(
       "SELECT DISTINCT fecha_pago as fecha FROM gasto_fijo WHERE usuario_id = ? AND frecuencia = 'unica' "
       "UNION SELECT DISTINCT fecha_cobro as fecha FROM ingreso_fijo WHERE usuario_id = ? AND frecuencia = 'unica'",
@@ -350,7 +347,6 @@ class CalendarioScreenState extends State<CalendarioScreen> {
                       child: Container(
                         width: 7, height: 7,
                         decoration: BoxDecoration(
-                          // Ámbar si es un plan pendiente, Azul si ya es un movimiento real
                           color: tienePlan ? Colors.amber : const Color(0xFF004481),
                           shape: BoxShape.circle,
                         ),
@@ -398,7 +394,6 @@ class CalendarioScreenState extends State<CalendarioScreen> {
                           decoration: BoxDecoration(
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(16),
-                            // Delineado Ámbar si es un plan por confirmar
                             border: esPlan ? Border.all(color: Colors.amber, width: 2.0) : null,
                             boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4))],
                         ),

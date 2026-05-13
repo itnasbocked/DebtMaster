@@ -25,31 +25,25 @@ class TarjetasScreenState extends State<TarjetasScreen> {
     cargarDatos();
   }
   
-  // --- EL CENTINELA: Programa alertas de Corte y Pago (Con Fix Temporal) ---
   Future<void> _programarAlertasTarjeta(String nombre, int diaCorte, int diaPago) async {
     DateTime ahora = DateTime.now();
 
-    // Función interna (Helper) para resolver la lógica temporal sin repetir código
     DateTime calcularFechaAlerta(int diaObjetivo) {
       DateTime fechaProgramada = DateTime(ahora.year, ahora.month, diaObjetivo, 9, 0);
 
       if (diaObjetivo == ahora.day) {
-        // Si el objetivo es hoy y ya pasaron las 9 AM, lanzamos en 1 minuto
         if (ahora.hour >= 9) {
           return ahora.add(const Duration(minutes: 1));
         } else {
           return fechaProgramada;
         }
       } else if (fechaProgramada.isBefore(ahora)) {
-        // OJO: Dart maneja automáticamente si month + 1 es enero del próximo año
         return DateTime(ahora.year, ahora.month + 1, diaObjetivo, 9, 0);
       }
       
-      // Si el día objetivo es en el futuro dentro de este mismo mes
       return fechaProgramada; 
     }
 
-    // 1. Alerta de Corte
     DateTime fechaCorte = calcularFechaAlerta(diaCorte);
     try {
       await NotificationService().programarNotificacion(
@@ -62,7 +56,6 @@ class TarjetasScreenState extends State<TarjetasScreen> {
       debugPrint("Error alerta corte: $e");
     }
 
-    // 2. Alerta de Pago
     DateTime fechaPago = calcularFechaAlerta(diaPago);
     try {
       await NotificationService().programarNotificacion(
@@ -104,7 +97,6 @@ class TarjetasScreenState extends State<TarjetasScreen> {
     cargarDatos();
   }
 
-  // --- MÁQUINA DE ESTADOS: FASE 2 (DECLARAR CORTE) ---
   void _declararCorte(Map<String, dynamic> tarjeta) {
     TextEditingController deudaCtrl = TextEditingController();
     showDialog(
@@ -227,7 +219,6 @@ class TarjetasScreenState extends State<TarjetasScreen> {
     );
   }
 
-  // --- CÁLCULOS DE HIERRO ---
   Future<void> cargarDatos() async {
     setState(() => _cargando = true);
     
@@ -237,12 +228,11 @@ class TarjetasScreenState extends State<TarjetasScreen> {
 
       List<Map<String, dynamic>> tarjList = await baseDatos.query('tarjeta', where: 'usuario_id = ?', whereArgs: [db.userId]);
 
-      // 1. Reinicio mensual: Si cambió el mes, la tarjeta vuelve a nacer limpia (Fase 1)
       for (var t in tarjList) {
         if (t['pagada'] == 1 && t['ultimo_mes_pagado'] != DateTime.now().month) {
           await baseDatos.update(
             'tarjeta', 
-            {'pagada': 0, 'monto_minimo': 0}, // Borrón y cuenta nueva
+            {'pagada': 0, 'monto_minimo': 0},
             where: 'id = ?', 
             whereArgs: [t['id']]
           );
@@ -255,14 +245,12 @@ class TarjetasScreenState extends State<TarjetasScreen> {
       List<Map<String, dynamic>> userList = await baseDatos.query('usuario', where: 'id = ?', whereArgs: [db.userId], limit: 1);
       if (userList.isNotEmpty) nombreDinamico = userList.first['nombre'] ?? "Usuario";
 
-      // 2. Extracción de Balance Real
       int balanceActualCentavos = await db.obtenerBalance(db.userId!);
       double balancePesos = balanceActualCentavos / 100;
 
       final ingresosData = await baseDatos.rawQuery("SELECT SUM(monto) as total FROM movimiento WHERE tipo = 'ingreso' AND usuario_id = ?", [db.userId]);
       double ingresosPesos = ((ingresosData.first['total'] as num?)?.toDouble() ?? 0.0) / 100;
 
-      // 3. Matemática del Presupuesto
       double obligacionesTotales = 0.0;
       for(var t in tarjList) {
         if (t['pagada'] == 0 && t['monto_minimo'] != null) {
@@ -270,14 +258,12 @@ class TarjetasScreenState extends State<TarjetasScreen> {
         }
       }
       
-      // Congelamos el dinero de las tarjetas
       double libreParaGastar = balancePesos - obligacionesTotales;
       if (libreParaGastar < 0) libreParaGastar = 0;
       
       DateTime hoy = DateTime.now();
       int diasRestantesMes = DateTime(hoy.year, hoy.month + 1, 0).day - hoy.day + 1;
       
-      // Este es tu presupuesto indestructible
       double presupuestoDiarioReal = libreParaGastar / diasRestantesMes;
 
       double porcentaje = 0.0;
@@ -300,7 +286,6 @@ class TarjetasScreenState extends State<TarjetasScreen> {
     }
   }
 
-  // --- FASE 1: CREACIÓN DE TARJETA ---
   void _mostrarFormularioNuevaTarjeta(BuildContext context) {
     final nombreCtrl = TextEditingController();
     final numeroCtrl = TextEditingController();
@@ -375,7 +360,7 @@ class TarjetasScreenState extends State<TarjetasScreen> {
                         'tipo': 'Credito',
                         'corte_dia': int.tryParse(corteCtrl.text) ?? 1,
                         'pago_dia': int.tryParse(pagoCtrl.text) ?? 1,
-                        'monto_minimo': 0, // Nace en Fase 1 (Reposo)
+                        'monto_minimo': 0,
                         'pagada': 0,
                         'ultimo_mes_pagado': 0
                       };
@@ -461,7 +446,6 @@ class TarjetasScreenState extends State<TarjetasScreen> {
                         itemBuilder: (context, index) {
                           final t = _misTarjetas[index];
                           
-                          // Lógica visual basada en la Máquina de Estados
                           bool estaPagada = t['pagada'] == 1;
                           bool enReposo = !estaPagada && (t['monto_minimo'] == 0 || t['monto_minimo'] == null);
                           bool conDeuda = !estaPagada && !enReposo;
@@ -478,7 +462,6 @@ class TarjetasScreenState extends State<TarjetasScreen> {
                                     margin: const EdgeInsets.symmetric(horizontal: 8),
                                     padding: const EdgeInsets.all(15),
                                     decoration: BoxDecoration(
-                                      // Colores semánticos: Azul (Reposo), Naranja/Rojo (Deuda), Gris (Pagada)
                                       color: estaPagada ? Colors.grey.shade400 : (conDeuda ? const Color(0xFFD35400) : const Color(0xFF004481)),
                                       borderRadius: BorderRadius.circular(20),
                                       boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 10, offset: const Offset(0, 5))],
@@ -504,7 +487,6 @@ class TarjetasScreenState extends State<TarjetasScreen> {
                                     ),
                                   ),
                                   
-                                  // Menú Dinámico
                                   Positioned(
                                     top: 5,
                                     right: 10,
@@ -537,7 +519,6 @@ class TarjetasScreenState extends State<TarjetasScreen> {
                                 ],
                               ),
                               const SizedBox(height: 12),
-                              // Subtítulos Dinámicos
                               if (estaPagada)
                                 const Text("\"Tarjeta al corriente este mes\"", style: TextStyle(color: Colors.green, fontStyle: FontStyle.italic, fontSize: 14))
                               else if (enReposo)

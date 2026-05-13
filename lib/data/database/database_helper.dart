@@ -15,14 +15,11 @@ class DatabaseHelper {
 
   Future<void> enviarBD() async {
     try {
-      // 1. Obtener la ruta real del archivo .db
       final db = await DatabaseHelper.instance.database;
       String path = db.path;
 
-      // 2. Crear una referencia al archivo
       XFile archivoParaEnviar = XFile(path);
 
-      // 3. Abrir la hoja de compartir nativa
       await Share.shareXFiles(
         [archivoParaEnviar],
         text: 'Respaldo de Base de Datos DebtMaster - Auditoría QA',
@@ -32,14 +29,12 @@ class DatabaseHelper {
     }
   }
 
-  // Obtener la base de datos
   Future<Database> get database async {
     if (_database != null) return _database!;
     _database = await _initDB('debtmaster.db');
     return _database!;
   }
 
-  // Inicializar DB
   Future<Database> _initDB(String filePath) async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
@@ -166,27 +161,6 @@ class DatabaseHelper {
     ''');
 
   }
-
-//Método obsoleto, se mantiene para pruebas pero no se llama desde la app | Posiblemente se elimine en futuras versiones
-// Future<void> inyectarTarjetaPrueba() async {
-//   debugPrint("Inicio");
-//   final db = await instance.database;
-  
-//   final List<Map<String, dynamic>> existentes = await db.query('tarjeta');
-//   if (existentes.isEmpty) {
-//     await db.insert('tarjeta', {
-//       'usuario_id': 1,
-//       'nombre_tarjeta': 'BBVA',
-//       'numero_tarjeta': 'XXXX XXXX XXXX 5678',
-//       'tipo': 'Credito',
-//       'corte_dia': 20,
-//       'pago_dia': 5,
-//       'monto_minimo': 250000
-//     });
-//     debugPrint("--- HARDWARE: Tarjeta de prueba inyectada con tu esquema ---");
-//     calcularPresupuestoDiarioSeguro();
-//   }
-// }
   
   Future<String> registrarUsuario(String nombre, String correo, String contrasena, int ingresoCentavos) async {
     final db = await database;
@@ -260,9 +234,7 @@ class DatabaseHelper {
     return await db.query('tarjeta', where: 'usuario_id = ?', whereArgs: [userId]);
   }
 
-  // --- MÉTODOS PARA EL CALENDARIO ---
-
-  // Obtener movimientos de una fecha específica
+ 
   Future<List<Map<String, dynamic>>> obtenerMovimientosPorFecha(String fecha) async {
     final db = await database;
     return await db.query(
@@ -272,30 +244,25 @@ class DatabaseHelper {
     );
   }
 
-  // Inserción en tabla general de movimientos
   Future<int> insertarMovimiento(Map<String, dynamic> movimiento) async {
     final db = await database;
     return await db.insert('movimiento', movimiento);
   }
 
-  // Inserción en Gasto Fijo
   Future<int> insertarGastoFijo(Map<String, dynamic> gastoFijo) async {
     final db = await database;
     return await db.insert('gasto_fijo', gastoFijo);
   }
 
-  // Inserción en Ingreso Fijo
   Future<int> insertarIngresoFijo(Map<String, dynamic> ingresoFijo) async {
     final db = await database;
     return await db.insert('ingreso_fijo', ingresoFijo);
   }
 
-  // Inserción de Alertas
   Future<int> insertarAlerta(Map<String, dynamic> alerta) async {
     final db = await database;
     return await db.insert('alerta', alerta);
   }
-
 
   //Funciones CRUD para usuarios
 

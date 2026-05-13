@@ -161,8 +161,6 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      // HitTestBehavior.opaque es vital: permite capturar toques incluso 
-      // en los espacios vacíos del fondo donde no hay widgets.
       behavior: HitTestBehavior.opaque,
       onDoubleTap: () {
         debugPrint("--- GESTO DE DEPURACIÓN: DOBLE TOQUE DETECTADO ---");
@@ -170,7 +168,6 @@ class _MainScreenState extends State<MainScreen> {
       },
       child: Scaffold(
         backgroundColor: const Color(0xFFF2F4F7),
-        // Barra superior
         appBar: AppBar(
           title: Text(
             _titulos[_selectedIndex],
@@ -188,7 +185,6 @@ class _MainScreenState extends State<MainScreen> {
             )
           ],
         ),
-        // Contenedor principal
         body: IndexedStack(
           index: _selectedIndex,
           children: _pantallas,
